@@ -1,0 +1,34 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ms-pedidos360-orders
+  
+  # Base de Datos Oracle
+  datasource:
+    url: jdbc:oracle:thin:@localhost:1521/XEPDB1
+    username: ${DB_USER:pedidos360}
+    password: ${DB_PASSWORD:password}
+    driver-class-name: oracle.jdbc.OracleDriver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database-platform: org.hibernate.dialect.OracleDialect
+
+  # Seguridad Azure AD
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/999128ab-cdb0-42d7-892c-d7e8752556f9/v2.0
+          audiences: api://d7430172-cf9c-438e-8a3a-210f88d2d23c
+
+  # Mensajería
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+  kafka:
+    bootstrap-servers: localhost:9092

@@ -1,0 +1,52 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-BffServiceApplication<bff-service>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.pedidos360.bff_service.BffServiceApplication",
+            "projectName": "bff-service",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-CatalogServiceApplication<ms-pedidos360-catalog>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.pedidos360.catalog_service.CatalogServiceApplication",
+            "projectName": "ms-pedidos360-catalog",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "DB_USER": "pedidos360",
+                "DB_PASSWORD": "password"
+            }
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-NotifyServiceApplication<ms-pedidos360-notify>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.pedidos360.notify_service.NotifyServiceApplication",
+            "projectName": "ms-pedidos360-notify",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-PedidosServiceApplication<ms-pedidos360-orders>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.pedidos360.pedidos_service.PedidosServiceApplication",
+            "projectName": "ms-pedidos360-orders",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "DB_USER": "pedidos360",
+                "DB_PASSWORD": "password"
+            }
+        }
+    ]
+}

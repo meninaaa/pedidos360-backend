@@ -1,0 +1,165 @@
+services:
+  oracle-db:
+    image: gvenzl/oracle-xe:21-slim-faststart
+    container_name: oracle-pedidos360
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: admin
+      APP_USER: pedidos360
+      APP_USER_PASSWORD: password
+    healthcheck:
+      test: ["CMD-SHELL", "sqlplus sys/admin@//localhost:1521/XEPDB1 as sysdba 'SELECT 1 FROM DUAL;' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - pedidos360-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq-pedidos360
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - pedidos360-net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper-pedidos360
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - pedidos360-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka-pedidos360
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-pedidos360:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-pedidos360:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - pedidos360-net
+
+  ms-catalog:
+    build: 
+      context: ../../ms-pedidos360-catalog
+      dockerfile: Dockerfile
+    container_name: catalog-pedidos360
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
+    restart: on-failure
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+    networks:
+      - pedidos360-net
+
+  ms-orders:
+    build: 
+      context: ../../ms-pedidos360-orders
+      dockerfile: Dockerfile
+    container_name: orders-pedidos360
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
+      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
+    restart: on-failure
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      kafka:
+        condition: service_started
+    networks:
+      - pedidos360-net
+
+  ms-notify:
+    build: 
+      context: ../../ms-pedidos360-notify
+      dockerfile: Dockerfile
+    container_name: notify-pedidos360
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
+    restart: on-failure
+    depends_on:
+      - rabbitmq
+      - kafka
+    networks:
+      - pedidos360-net
+
+  ms-audit:
+    build: 
+      context: ../../ms-pedidos360-audit
+      dockerfile: Dockerfile
+    container_name: audit-pedidos360
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
+    restart: on-failure
+    depends_on:
+      - rabbitmq
+      - kafka
+    networks:
+      - pedidos360-net
+
+  ms-report:
+    build: 
+      context: ../../ms-pedidos360-report
+      dockerfile: Dockerfile
+    container_name: report-pedidos360
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
+    restart: on-failure
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+    networks:
+      - pedidos360-net
+
+  bff-service:
+    build: 
+      context: ../../ms-pedidos360-bff
+      dockerfile: Dockerfile
+    container_name: bff-pedidos360
+    ports:
+      - "8080:8080"
+    environment:
+      - CATALOG_SERVICE_URL=http://catalog-pedidos360:8082
+      - ORDERS_SERVICE_URL=http://orders-pedidos360:8081
+    restart: on-failure
+    depends_on:
+      - ms-catalog
+      - ms-orders
+    networks:
+      - pedidos360-net
+
+networks:
+  pedidos360-net:
+    external: true
