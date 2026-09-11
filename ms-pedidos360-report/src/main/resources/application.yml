@@ -1,9 +1,9 @@
 server:
-  port: 8084
+  port: 8085
 
 spring:
   application:
-    name: ms-audit
+    name: ms-report
   
   datasource:
     url: jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
@@ -13,7 +13,7 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     show-sql: true
     properties:
       hibernate:
@@ -22,7 +22,7 @@ spring:
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-pedidos360:29092}
     consumer:
-      group-id: audit-group
+      group-id: report-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer

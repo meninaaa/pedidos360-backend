@@ -3,7 +3,7 @@ services:
     image: gvenzl/oracle-xe:21-slim-faststart
     container_name: oracle-pedidos360
     ports:
-      - "1521:1521"
+      - "1522:1521"
     environment:
       ORACLE_PASSWORD: admin
       APP_USER: pedidos360
@@ -162,4 +162,4 @@ services:
 
 networks:
   pedidos360-net:
-    external: true
+    driver: bridge

@@ -6,8 +6,11 @@ spring:
     name: ms-pedidos360-catalog
   
   datasource:
-    url: jdbc:oracle:thin:pedidos360/password@//localhost:1521/XEPDB1
+    url: jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
+    username: pedidos360
+    password: password
     driver-class-name: oracle.jdbc.OracleDriver
+  
   jpa:
     hibernate:
       ddl-auto: update
