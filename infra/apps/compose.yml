@@ -52,6 +52,12 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - pedidos360-net
 
@@ -64,7 +70,7 @@ services:
       - "8082:8082"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
-    restart: on-failure
+    ##restart: on-failure
     depends_on:
       oracle-db:
         condition: service_healthy
@@ -82,14 +88,14 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
       - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    restart: on-failure
+    ##restart: on-failure
     depends_on:
       oracle-db:
         condition: service_healthy
       rabbitmq:
         condition: service_started
       kafka:
-        condition: service_started
+        condition: service_healthy
     networks:
       - pedidos360-net
 
@@ -103,7 +109,7 @@ services:
     environment:
       - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    restart: on-failure
+    #restart: on-failure
     depends_on:
       - rabbitmq
       - kafka
@@ -120,10 +126,12 @@ services:
     environment:
       - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    restart: on-failure
+    #restart: on-failure
     depends_on:
-      - rabbitmq
-      - kafka
+      rabbitmq:
+        condition: service_started
+      kafka:
+        condition: service_healthy
     networks:
       - pedidos360-net
 
@@ -136,9 +144,11 @@ services:
       - "8085:8085"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
-    restart: on-failure
+    #restart: on-failure
     depends_on:
       oracle-db:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
     networks:
       - pedidos360-net
@@ -153,7 +163,9 @@ services:
     environment:
       - CATALOG_SERVICE_URL=http://catalog-pedidos360:8082
       - ORDERS_SERVICE_URL=http://orders-pedidos360:8081
-    restart: on-failure
+      - AUDIT_SERVICE_URL=http://audit-pedidos360:8084
+      - REPORT_SERVICE_URL=http://report-pedidos360:8085
+    #restart: on-failure
     depends_on:
       - ms-catalog
       - ms-orders

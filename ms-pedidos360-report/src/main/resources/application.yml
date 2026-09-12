@@ -5,11 +5,18 @@ spring:
   application:
     name: ms-report
   
+  main:
+    allow-bean-definition-overriding: true
+
   datasource:
     url: jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
     username: pedidos360
     password: password
     driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      connection-timeout: 120000
+      maximum-pool-size: 5
+      initialization-fail-timeout: 0
   
   jpa:
     hibernate:
