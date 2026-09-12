@@ -1,5 +1,6 @@
 package com.pedidos360.bff_service.controller;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ public class BffController {
     @Value("${REPORT_SERVICE_URL:http://report-pedidos360:8085}")
     private String reportUrl;
 
+    @Autowired
     public BffController(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
