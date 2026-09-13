@@ -54,4 +54,11 @@ public class BffController {
     public ResponseEntity<?> getReportSummary() {
         return ResponseEntity.ok(restTemplate.getForObject(reportUrl + "/api/reports/orders-summary", Object.class));
     }
+
+    @PutMapping("/orders/{id}/status")
+    public ResponseEntity<?> updateOrderStatus(@PathVariable Long id, @RequestParam String nuevoEstado) {
+        String url = ordersUrl + "/api/orders/" + id + "/status?nuevoEstado=" + nuevoEstado;
+        restTemplate.put(url, null);
+        return ResponseEntity.ok().build();
+    }
 }

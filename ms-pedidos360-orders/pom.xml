@@ -12,7 +12,7 @@
     <artifactId>ms-pedidos360-orders</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <properties>
-        <java.version>21</java.version>
+        <java.version>17</java.version>
     </properties>
     <dependencies>
         <!-- Web & WebFlux -->

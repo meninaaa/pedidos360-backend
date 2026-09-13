@@ -20,12 +20,18 @@ public class CatalogServiceApplication {
         return args -> {
             if (repository.count() == 0) {
                 repository.saveAll(Arrays.asList(
-                    new Product("MacBook Pro M3", 10, 2500.0),
-                    new Product("Monitor LG UltraWide 34\"", 15, 600.0),
-                    new Product("Teclado Mecánico Keychron K2", 50, 100.0),
-                    new Product("Mouse Logitech MX Master 3S", 30, 90.0)
+                    new Product("MacBook Pro M3", 10, 2500000.0),
+                    new Product("Monitor LG UltraWide 34\"", 15, 350000.0),
+                    new Product("Teclado Mecánico Keychron K2", 50, 100000.0),
+                    new Product("Mouse Logitech MX Master 3S", 30, 90000.0),
+                    new Product("Audífonos Sony WH-1000XM5", 25, 280000.0),
+                    new Product("Hub USB-C Satechi", 40, 65000.0),
+                    new Product("Silla Ergonómica Herman Miller", 5, 1200000.0),
+                    new Product("Escritorio Elevable FlexiSpot", 8, 450000.0),
+                    new Product("Disco Duro Externo SSD 1TB Samsung", 60, 110000.0),
+                    new Product("Cámara Web Logitech Brio 4K", 20, 150000.0)
                 ));
-                System.out.println("✅ Catálogo inicializado exitosamente en Oracle.");
+                System.out.println("✅ Catálogo inicializado con 10 productos en Oracle.");
             }
         };
     }
