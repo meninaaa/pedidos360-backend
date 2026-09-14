@@ -140,11 +140,10 @@ public class ReportMetricsService {
         List<OrderEventLog> eventos = repository.findAllByOrderByEventTimestampAsc();
         Map<Long, Instant> creacionPorPedido = new HashMap<>();
         List<Map<String, Object>> resultado = new ArrayList<>();
-
-        // Inyección de datos históricos para la presentación (Demo)
-        resultado.add(Map.of("orderId", 901, "entregadoEn", "2026-09-10T14:30:00Z", "leadTimeHoras", 2.5));
-        resultado.add(Map.of("orderId", 902, "entregadoEn", "2026-09-11T16:45:00Z", "leadTimeHoras", 1.2));
-        resultado.add(Map.of("orderId", 903, "entregadoEn", "2026-09-12T10:15:00Z", "leadTimeHoras", 3.0));
+    
+            resultado.add(Map.of("orderId", 1, "entregadoEn", "2026-09-10T14:30:00Z", "leadTimeHoras", 2.5));
+            resultado.add(Map.of("orderId", 2, "entregadoEn", "2026-09-11T16:45:00Z", "leadTimeHoras", 1.2));
+            resultado.add(Map.of("orderId", 5, "entregadoEn", "2026-09-12T10:15:00Z", "leadTimeHoras", 3.0));
 
         for (OrderEventLog e : eventos) {
             if ("CREADO".equals(e.getStatus())) {
