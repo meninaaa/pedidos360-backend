@@ -11,32 +11,33 @@ public class AuditLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    private String eventType; // ej: ORDER_CREATED, ORDER_UPDATED
+    private String eventType;
 
-    @Column(nullable = false, length = 1000)
-    private String payload; // Detalles del evento (JSON)
+    // Ampliamos el tamaño para asegurar que el JSON completo quepa en la base de datos
+    @Column(length = 4000) 
+    private String payload;
 
-    @Column(nullable = false)
+    // EL ATRIBUTO QUE FALTABA
+    private String actor;
+
     private LocalDateTime timestamp;
 
     public AuditLog() {
-        this.timestamp = LocalDateTime.now();
-    }
-
-    public AuditLog(String eventType, String payload) {
-        this.eventType = eventType;
-        this.payload = payload;
-        this.timestamp = LocalDateTime.now();
     }
 
     // Getters y Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
     public String getEventType() { return eventType; }
     public void setEventType(String eventType) { this.eventType = eventType; }
+
     public String getPayload() { return payload; }
     public void setPayload(String payload) { this.payload = payload; }
+
+    public String getActor() { return actor; }
+    public void setActor(String actor) { this.actor = actor; }
+
     public LocalDateTime getTimestamp() { return timestamp; }
     public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
 }

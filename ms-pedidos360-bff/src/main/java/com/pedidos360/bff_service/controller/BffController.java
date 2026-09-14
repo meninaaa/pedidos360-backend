@@ -3,6 +3,7 @@ package com.pedidos360.bff_service.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import java.util.List;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import java.util.Map;
@@ -40,10 +41,6 @@ public class BffController {
         return ResponseEntity.ok(restTemplate.getForObject(ordersUrl + "/api/orders", Object.class));
     }
 
-    @PostMapping("/orders")
-    public ResponseEntity<?> createOrder(@RequestBody Map<String, Object> orderRequest) {
-        return ResponseEntity.ok(restTemplate.postForObject(ordersUrl + "/api/orders", orderRequest, Object.class));
-    }
 
     @GetMapping("/audit")
     public ResponseEntity<?> getAuditLogs() {
@@ -52,7 +49,8 @@ public class BffController {
 
     @GetMapping("/reports/summary")
     public ResponseEntity<?> getReportSummary() {
-        return ResponseEntity.ok(restTemplate.getForObject(reportUrl + "/api/reports/orders-summary", Object.class));
+        // Ajustado para que coincida exactamente con la ruta configurada en el ReportController
+        return ResponseEntity.ok(restTemplate.getForObject(reportUrl + "/api/reports/summary", Object.class));
     }
 
     @PutMapping("/orders/{id}/status")
@@ -60,5 +58,48 @@ public class BffController {
         String url = ordersUrl + "/api/orders/" + id + "/status?nuevoEstado=" + nuevoEstado;
         restTemplate.put(url, null);
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/catalog/products")
+    public ResponseEntity<?> createProduct(@RequestBody Map<String, Object> productRequest) {
+        return ResponseEntity.ok(restTemplate.postForObject(catalogUrl + "/api/catalog/products", productRequest, Object.class));
+    }
+
+    @PutMapping("/catalog/products/{id}")
+    public ResponseEntity<?> updateProduct(@PathVariable Long id, @RequestBody Map<String, Object> productRequest) {
+        String url = catalogUrl + "/api/catalog/products/" + id;
+        restTemplate.put(url, productRequest);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/catalog/products/{id}")
+    public ResponseEntity<?> deleteProduct(@PathVariable Long id) {
+        String url = catalogUrl + "/api/catalog/products/" + id;
+        restTemplate.delete(url);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/reports/ventas-por-hora")
+    public ResponseEntity<?> getVentasPorHora() {
+        String url = reportUrl + "/api/reports/ventas-por-hora";
+        return restTemplate.getForEntity(url, List.class);
+    }
+
+    @GetMapping("/reports/lead-time-trend")
+    public ResponseEntity<?> getLeadTimeTrend() {
+        String url = reportUrl + "/api/reports/lead-time-trend";
+        return restTemplate.getForEntity(url, List.class);
+    }
+
+    @GetMapping("/reports/top-productos")
+    public ResponseEntity<?> getTopProductos() {
+        String url = reportUrl + "/api/reports/top-productos";
+        return restTemplate.getForEntity(url, List.class);
+    }
+
+    @PostMapping("/orders")
+    public ResponseEntity<?> createOrder(@RequestBody Object order) {
+        String url = ordersUrl + "/api/orders"; 
+        return restTemplate.postForEntity(url, order, Object.class);
     }
 }
