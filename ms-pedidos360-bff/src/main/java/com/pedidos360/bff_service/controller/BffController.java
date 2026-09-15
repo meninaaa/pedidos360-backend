@@ -83,6 +83,12 @@ public class BffController {
         return restTemplate.exchange(ordersUrl + "/api/orders/pending", HttpMethod.GET, entity, Object.class);
     }
 
+    @GetMapping("/orders/me")
+    public ResponseEntity<?> getMyOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        HttpEntity<Object> entity = createHttpEntity(null, authHeader);
+        return restTemplate.exchange(ordersUrl + "/api/orders/me", HttpMethod.GET, entity, Object.class);
+    }
+
     @PostMapping("/orders")
     public ResponseEntity<?> createOrder(@RequestBody Object order, @RequestHeader(value = "Authorization", required = false) String authHeader) {
         HttpEntity<Object> entity = createHttpEntity(order, authHeader);
