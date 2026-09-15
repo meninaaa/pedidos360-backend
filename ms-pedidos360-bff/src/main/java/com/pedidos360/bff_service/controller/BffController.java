@@ -48,8 +48,32 @@ public class BffController {
 
     @GetMapping("/orders")
     public ResponseEntity<?> getOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        String targetEndpoint = "/api/orders/me"; // Por defecto, asumimos que es Cliente (el acceso más bajo)
+
+        // Decodificamos manualmente el Token JWT para leer el rol de forma segura sin romper Spring
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            try {
+                String token = authHeader.substring(7);
+                String[] chunks = token.split("\\.");
+                if (chunks.length > 1) {
+                    java.util.Base64.Decoder decoder = java.util.Base64.getUrlDecoder();
+                    String payload = new String(decoder.decode(chunks[1]));
+                    
+                    // Verificamos qué rol viene dentro del token
+                    if (payload.contains("\"Admin\"") || payload.contains("\"ADMIN\"")) {
+                        targetEndpoint = "/api/orders"; // El admin ve todo
+                    } else if (payload.contains("\"Operador\"") || payload.contains("\"OPERADOR\"")) {
+                        targetEndpoint = "/api/orders/pending"; // El operador ve los pendientes
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println("Advertencia: No se pudo decodificar el token en el BFF.");
+            }
+        }
+
+        // Enviamos la petición al microservicio correcto con el carnet (Token) adjunto
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
-        return restTemplate.exchange(ordersUrl + "/api/orders", HttpMethod.GET, entity, Object.class);
+        return restTemplate.exchange(ordersUrl + targetEndpoint, HttpMethod.GET, entity, Object.class);
     }
 
     // Ruta específica para el Dashboard del Operador (Evita el 404)
