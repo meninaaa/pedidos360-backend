@@ -1,0 +1,5 @@
+com\pedidos360\report_service\controller\ReportController.class
+com\pedidos360\report_service\service\ReportMetricsService.class
+com\pedidos360\report_service\repository\OrderEventLogRepository.class
+com\pedidos360\report_service\ReportServiceApplication.class
+com\pedidos360\report_service\entity\OrderEventLog.class

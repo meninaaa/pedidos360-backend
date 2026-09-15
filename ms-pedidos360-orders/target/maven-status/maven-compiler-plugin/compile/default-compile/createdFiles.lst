@@ -1,0 +1,10 @@
+com\pedidos360\orders_service\messaging\EventEnvelope.class
+com\pedidos360\orders_service\OrdersServiceApplication.class
+com\pedidos360\orders_service\service\OrderService.class
+com\pedidos360\orders_service\repository\OrderRepository.class
+com\pedidos360\orders_service\entity\Order.class
+com\pedidos360\orders_service\entity\Order$OrderStatus.class
+com\pedidos360\orders_service\config\RabbitMQConfig.class
+com\pedidos360\orders_service\config\AppConfig.class
+com\pedidos360\orders_service\controller\OrderController.class
+com\pedidos360\orders_service\config\SecurityConfig.class

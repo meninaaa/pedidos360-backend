@@ -1,0 +1,7 @@
+com\pedidos360\catalog_service\controller\CatalogController.class
+com\pedidos360\catalog_service\CatalogServiceApplication.class
+com\pedidos360\catalog_service\entity\Product.class
+com\pedidos360\catalog_service\config\SecurityConfig$1.class
+com\pedidos360\catalog_service\service\CatalogService.class
+com\pedidos360\catalog_service\repository\ProductRepository.class
+com\pedidos360\catalog_service\config\SecurityConfig.class

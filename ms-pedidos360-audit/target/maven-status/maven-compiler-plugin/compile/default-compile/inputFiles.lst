@@ -1,0 +1,6 @@
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\AuditServiceApplication.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\config\SecurityConfig.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\controller\AuditController.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\entity\AuditLog.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\repository\AuditLogRepository.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-audit\src\main\java\com\pedidos360\audit_service\service\AuditConsumerService.java

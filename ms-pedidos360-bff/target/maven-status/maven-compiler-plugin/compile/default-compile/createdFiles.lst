@@ -1,0 +1,7 @@
+com\pedidos360\bff_service\config\CorsConfig$1.class
+com\pedidos360\bff_service\controller\BffController.class
+com\pedidos360\bff_service\config\CorsConfig.class
+com\pedidos360\bff_service\BffServiceApplication.class
+com\pedidos360\bff_service\config\RestClientConfig.class
+com\pedidos360\bff_service\config\SecurityConfig$1.class
+com\pedidos360\bff_service\config\SecurityConfig.class

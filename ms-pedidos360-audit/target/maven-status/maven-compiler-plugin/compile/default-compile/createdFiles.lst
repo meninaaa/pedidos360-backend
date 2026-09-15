@@ -1,0 +1,6 @@
+com\pedidos360\audit_service\entity\AuditLog.class
+com\pedidos360\audit_service\service\AuditConsumerService.class
+com\pedidos360\audit_service\AuditServiceApplication.class
+com\pedidos360\audit_service\config\SecurityConfig.class
+com\pedidos360\audit_service\controller\AuditController.class
+com\pedidos360\audit_service\repository\AuditLogRepository.class
