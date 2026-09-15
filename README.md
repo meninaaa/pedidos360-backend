@@ -6,20 +6,22 @@ Sistema central y arquitectura de microservicios desarrollada en **Spring Boot**
 
 ## Características Principales
 
-*   **Arquitectura Backend For Frontend (BFF):** Centraliza y optimiza las peticiones del cliente (Angular), reduciendo el acoplamiento y manejando la comunicación interna con los microservicios subyacentes (Orders, Catalog, Audit, Reports).
-*   **Seguridad y Procesamiento JWT:** Implementación de decodificación y validación de tokens JWT en la capa de controladores del BFF. Extracción segura de claims y roles corporativos provenientes de Azure AD/MSAL.
-*   **Enrutamiento Basado en Roles (RBAC):** Resolución dinámica de endpoints dependiendo de los privilegios del usuario autenticado:
-    *   **Admin:** Acceso a `/api/orders` (Gestión total).
-    *   **Operator:** Acceso a `/api/orders/pending` (Gestión operativa).
-    *   **Customer:** Acceso a `/api/orders/me` (Aislamiento de datos por cliente).
-*   **Persistencia y Sincronización:** Uso de base de datos relacional H2 (en memoria) para el almacenamiento eficiente de registros logísticos, ideal para entornos de desarrollo y pruebas de concepto rápidas.
+* **Arquitectura Backend For Frontend (BFF):** Centraliza y optimiza las peticiones del cliente (Angular), reduciendo el acoplamiento y manejando la comunicación interna con los microservicios subyacentes (Orders, Catalog, Audit, Reports).
+* **Seguridad y Procesamiento JWT:** Implementación de decodificación y validación de tokens JWT en la capa de controladores del BFF. Extracción segura de claims y roles corporativos provenientes de Azure AD/MSAL.
+* **Enrutamiento Basado en Roles (RBAC):** Resolución dinámica de endpoints dependiendo de los privilegios del usuario autenticado:
+    * **Admin:** Acceso a `/api/orders` (Gestión total).
+    * **Operator:** Acceso a `/api/orders/pending` (Gestión operativa).
+    * **Customer:** Acceso a `/api/orders/me` (Aislamiento de datos por cliente).
+* **Persistencia y Sincronización:** Uso de base de datos relacional H2 (en memoria) para el almacenamiento eficiente de registros logísticos, ideal para entornos de desarrollo y pruebas de concepto rápidas.
+
+---
 
 ## Arquitectura y Componentes Técnicos
 
-*   **Framework Principal:** Spring Boot (Java).
-*   **Gestión de Dependencias y Build:** Maven (Wrapper incluido).
-*   **Contenedores y Cloud:** Preparado para ejecución nativa en instancias de **AWS EC2** y exposición a través de **AWS API Gateway**.
-*   **Documentación de API:** Integración nativa con `springdoc-openapi` para la generación de contratos Swagger.
+* **Framework Principal:** Spring Boot (Java).
+* **Gestión de Dependencias y Build:** Maven (Wrapper incluido).
+* **Contenedores y Cloud:** Preparado para ejecución nativa en instancias de **AWS EC2** y exposición a través de **AWS API Gateway**.
+* **Documentación de API:** Integración nativa con `springdoc-openapi` para la generación de contratos Swagger.
 
 ---
 
@@ -41,9 +43,9 @@ Para acceder a la consola interactiva de Swagger:
 
 Para compilar y ejecutar este proyecto de forma local, se requiere:
 
-*   **Java Development Kit (JDK):** Versión 17 o superior.
-*   **Git:** Para el control de versiones.
-*   *(Nota: No es necesario tener Maven instalado globalmente, el proyecto incluye el wrapper `./mvnw`)*.
+* **Java Development Kit (JDK):** Versión 17 o superior.
+* **Git:** Para el control de versiones.
+* *(Nota: No es necesario tener Maven instalado globalmente, el proyecto incluye el wrapper `./mvnw`)*.
 
 ---
 
@@ -63,25 +65,16 @@ Bash
 ./mvnw spring-boot:run
 El servicio iniciará y estará disponible para recibir peticiones en el puerto 8080.
 
-Despliegue en AWS EC2 y API Gateway
-El sistema está diseñado para integrarse fácilmente en el ecosistema de Amazon Web Services. Sigue estos pasos para un despliegue estándar:
+Despliegue en AWS (EC2 y API Gateway)
+El sistema está diseñado para integrarse fácilmente en el ecosistema de Amazon Web Services. Sigue estos pasos para un despliegue estándar en producción:
 
-Empaquetado de Producción:
+1. Empaquetado de Producción
 Genera el archivo ejecutable unificado (.jar) que contiene el servidor web embebido:
 
 Bash
 ./mvnw clean package -DskipTests
-Despliegue en EC2:
-Transfiere el archivo empaquetado (ubicado en la carpeta /target) a tu instancia de AWS EC2. Para mantener el servicio en ejecución en segundo plano incluso al cerrar la sesión SSH, utiliza:
+2. Despliegue en AWS EC2
+Transfiere el archivo empaquetado (ubicado en la carpeta target/) a tu instancia de AWS EC2. Para mantener el servicio en ejecución en segundo plano incluso al cerrar la sesión SSH, conéctate a tu instancia y ejecuta:
 
 Bash
 nohup java -jar target/pedidos360-backend.jar > app.log 2>&1 &
-Configuración de AWS API Gateway:
-Crea un API Gateway HTTP y configura una integración HTTP (Proxy) apuntando a la IP pública y puerto de la instancia EC2 (http://<IP_EC2>:8080).
-
-Utiliza la ruta de reenvío con comodín /{proxy+} para garantizar que todas las rutas internas del BFF (ej. /api/bff/...) se resuelvan correctamente a través del Gateway de AWS.
-
-
-*(Nuevamente, recuerda cambiar `<TU_IP_O_DOMINIO_AWS>` por la IP pública de tu EC2).*
-
-¡Con esto tus dos repositorios quedan documentados con un estándar altísimo!
