@@ -53,7 +53,7 @@ Para compilar y ejecutar este proyecto de forma local, se requiere:
 
 1. **Clonar el repositorio:**
    ```bash
-   git clone [https://github.com/meninaaa/pedidos360-backend.git](https://github.com/meninaaa/pedidos360-backend.git)
+   git clone https://github.com/meninaaa/pedidos360-backend.git
    cd pedidos360-backend
 Compilar el proyecto y descargar dependencias:
 
