@@ -1,5 +1,6 @@
 package com.pedidos360.bff_service.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -8,13 +9,19 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/bff")
 public class BffController {
 
     private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${CATALOG_SERVICE_URL:http://catalog-pedidos360:8082}")
     private String catalogUrl;
@@ -33,7 +40,6 @@ public class BffController {
         this.restTemplate = restTemplate;
     }
 
-    // --- MÉTODO AUXILIAR PARA PROPAGAR EL TOKEN A TODOS LOS MICROSERVICIOS ---
     private HttpEntity<Object> createHttpEntity(Object body, String authHeader) {
         HttpHeaders headers = new HttpHeaders();
         if (authHeader != null) {
@@ -48,35 +54,33 @@ public class BffController {
 
     @GetMapping("/orders")
     public ResponseEntity<?> getOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        String targetEndpoint = "/api/orders/me"; // Por defecto, asumimos que es Cliente (el acceso más bajo)
+        String targetEndpoint = "/api/orders/me"; 
 
-        // Decodificamos manualmente el Token JWT para leer el rol de forma segura sin romper Spring
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             try {
                 String token = authHeader.substring(7);
                 String[] chunks = token.split("\\.");
                 if (chunks.length > 1) {
-                    java.util.Base64.Decoder decoder = java.util.Base64.getUrlDecoder();
-                    String payload = new String(decoder.decode(chunks[1]));
+                    String payload = new String(Base64.getUrlDecoder().decode(chunks[1]));
+                    Map<String, Object> claims = objectMapper.readValue(payload, Map.class);
                     
-                    // Verificamos qué rol viene dentro del token
-                    if (payload.contains("\"Admin\"") || payload.contains("\"ADMIN\"")) {
-                        targetEndpoint = "/api/orders"; // El admin ve todo
-                    } else if (payload.contains("\"Operador\"") || payload.contains("\"OPERADOR\"")) {
-                        targetEndpoint = "/api/orders/pending"; // El operador ve los pendientes
+                    // CORREGIDO: Uso correcto de paréntesis en claims.get("roles")
+                    String rolesStr = claims.get("roles") != null ? claims.get("roles").toString() : "";
+                    if (rolesStr.contains("Admin") || rolesStr.contains("Administrador")) {
+                        targetEndpoint = "/api/orders"; 
+                    } else if (rolesStr.contains("Operador") || rolesStr.contains("Operador de Logística")) {
+                        targetEndpoint = "/api/orders/pending"; 
                     }
                 }
             } catch (Exception e) {
-                System.out.println("Advertencia: No se pudo decodificar el token en el BFF.");
+                System.out.println("Advertencia: No se pudo decodificar el token en /orders: " + e.getMessage());
             }
         }
 
-        // Enviamos la petición al microservicio correcto con el carnet (Token) adjunto
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
         return restTemplate.exchange(ordersUrl + targetEndpoint, HttpMethod.GET, entity, Object.class);
     }
 
-    // Ruta específica para el Dashboard del Operador (Evita el 404)
     @GetMapping("/orders/pending")
     public ResponseEntity<?> getPendingOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
@@ -85,8 +89,54 @@ public class BffController {
 
     @GetMapping("/orders/me")
     public ResponseEntity<?> getMyOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        HttpEntity<Object> entity = createHttpEntity(null, authHeader);
-        return restTemplate.exchange(ordersUrl + "/api/orders/me", HttpMethod.GET, entity, Object.class);
+        try {
+            String userEmail = "";
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7);
+                String[] chunks = token.split("\\.");
+                if (chunks.length > 1) {
+                    String payload = new String(Base64.getUrlDecoder().decode(chunks[1]));
+                    Map<String, Object> claims = objectMapper.readValue(payload, Map.class);
+                    
+                    if (claims.containsKey("preferred_username")) {
+                        userEmail = claims.get("preferred_username").toString();
+                    } else if (claims.containsKey("email")) {
+                        userEmail = claims.get("email").toString();
+                    } else if (claims.containsKey("upn")) {
+                        userEmail = claims.get("upn").toString();
+                    } else if (claims.containsKey("unique_name")) {
+                        userEmail = claims.get("unique_name").toString();
+                    }
+                }
+            }
+
+            HttpEntity<Object> entity = createHttpEntity(null, authHeader);
+            ResponseEntity<List> response = restTemplate.exchange(ordersUrl + "/api/orders", HttpMethod.GET, entity, List.class);
+            
+            List<Map<String, Object>> allOrders = (List<Map<String, Object>>) response.getBody();
+            if (allOrders == null) {
+                return ResponseEntity.ok(Collections.emptyList());
+            }
+
+            if (userEmail != null && !userEmail.isEmpty()) {
+                String finalEmail = userEmail.trim();
+                List<Map<String, Object>> filteredOrders = allOrders.stream()
+                    .filter(order -> {
+                        Object custId = order.get("customerId");
+                        if (custId == null) return false;
+                        String customerStr = custId.toString().trim();
+                        return customerStr.equalsIgnoreCase(finalEmail) || customerStr.toLowerCase().contains(finalEmail.toLowerCase());
+                    })
+                    .collect(Collectors.toList());
+                return ResponseEntity.ok(filteredOrders);
+            }
+
+            return ResponseEntity.ok(allOrders);
+        } catch (Exception e) {
+            System.out.println("Error procesando /orders/me en el BFF: " + e.getMessage());
+            HttpEntity<Object> entity = createHttpEntity(null, authHeader);
+            return restTemplate.exchange(ordersUrl + "/api/orders/me", HttpMethod.GET, entity, Object.class);
+        }
     }
 
     @PostMapping("/orders")
@@ -101,7 +151,6 @@ public class BffController {
         String url = ordersUrl + "/api/orders/" + id + "/status?nuevoEstado=" + nuevoEstado;
         return restTemplate.exchange(url, HttpMethod.PUT, entity, Object.class);
     }
-
 
     // ==========================================
     // MÓDULO DE CATÁLOGO (CATALOG)
@@ -133,7 +182,6 @@ public class BffController {
         return restTemplate.exchange(url, HttpMethod.DELETE, entity, Object.class);
     }
 
-
     // ==========================================
     // MÓDULO DE AUDITORÍA (AUDIT)
     // ==========================================
@@ -143,7 +191,6 @@ public class BffController {
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
         return restTemplate.exchange(auditUrl + "/api/audit", HttpMethod.GET, entity, Object.class);
     }
-
 
     // ==========================================
     // MÓDULO DE REPORTERÍA (REPORTS)
