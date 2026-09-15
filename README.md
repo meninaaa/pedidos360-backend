@@ -31,7 +31,7 @@ Para acceder a la consola interactiva de Swagger:
 
 > **Entorno Local:** `http://localhost:8080/swagger-ui.html`
 > 
-> **Entorno de Producción (AWS EC2):** `http://<TU_IP_O_DOMINIO_AWS>:8080/swagger-ui/index.html`
+> **Entorno de Producción (AWS EC2):** `https://3lgyldt561.execute-api.us-east-1.amazonaws.com/swagger-ui/index.html`
 
 *Nota de infraestructura:* Asegúrate de que el Security Group de la instancia EC2 tenga habilitado el tráfico de entrada (Inbound Rules) en el puerto TCP `8080` para permitir la visualización pública de esta interfaz.
 
