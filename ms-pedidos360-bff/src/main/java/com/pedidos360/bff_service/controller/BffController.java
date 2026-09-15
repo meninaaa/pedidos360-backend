@@ -3,6 +3,9 @@ package com.pedidos360.bff_service.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.Authentication;
+
 import java.util.List;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -34,11 +37,6 @@ public class BffController {
     @GetMapping("/catalog/products")
     public ResponseEntity<?> getProducts() {
         return ResponseEntity.ok(restTemplate.getForObject(catalogUrl + "/api/catalog/products", Object.class));
-    }
-
-    @GetMapping("/orders")
-    public ResponseEntity<?> getOrders() {
-        return ResponseEntity.ok(restTemplate.getForObject(ordersUrl + "/api/orders", Object.class));
     }
 
 
@@ -97,9 +95,22 @@ public class BffController {
         return restTemplate.getForEntity(url, List.class);
     }
 
-    @PostMapping("/orders")
-    public ResponseEntity<?> createOrder(@RequestBody Object order) {
-        String url = ordersUrl + "/api/orders"; 
-        return restTemplate.postForEntity(url, order, Object.class);
+     @GetMapping("/orders")
+        public ResponseEntity<?> getOrders() {
+        // 1. Obtenemos la identidad y los roles del usuario autenticado en el BFF
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String roles = auth.getAuthorities().toString(); // Se verá como "[ROLE_Cliente]"
+
+        // 2. Definimos a qué endpoint del microservicio debe ir según su rol
+        String targetEndpoint = "/api/orders/me"; // Por defecto, asumimos que es Cliente y solo ve los suyos
+
+        if (roles.contains("ROLE_Admin")) {
+            targetEndpoint = "/api/orders"; // El admin ve todo
+        } else if (roles.contains("ROLE_Operador")) {
+            targetEndpoint = "/api/orders/pending"; // El operador ve los pendientes
+        }
+
+        // 3. Hacemos la llamada al microservicio con la ruta correcta
+        return ResponseEntity.ok(restTemplate.getForObject(ordersUrl + targetEndpoint, Object.class));
     }
 }
