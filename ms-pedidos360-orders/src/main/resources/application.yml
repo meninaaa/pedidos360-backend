@@ -1,0 +1,47 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ms-pedidos360-orders
+
+  main:
+    allow-bean-definition-overriding: true
+  
+  datasource:
+    url: jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
+    username: pedidos360
+    password: password
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      connection-timeout: 120000
+      maximum-pool-size: 5
+      initialization-fail-timeout: 0
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database-platform: org.hibernate.dialect.OracleDialect
+  
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:rabbitmq-pedidos360}
+    port: 5672
+    username: guest
+    password: guest
+  
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-pedidos360:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: orders-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://login.microsoftonline.com/999128ab-cdb0-42d7-892c-d7e8752556f9/v2.0
+          audiences: d7430172-cf9c-438e-8a3a-210f88d2d23c

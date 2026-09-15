@@ -1,0 +1,49 @@
+version: '3.8'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper-pedidos360
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - pedidos360-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-pedidos360
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - pedidos360-net
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-init
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Esperar a que Kafka inicie
+      sleep 15s
+      # Crear tópicos según topología del caso
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.events --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.timeline --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic report.DLT --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.DLT --partitions 3 --replication-factor 1
+      echo 'Tópicos creados exitosamente'
+      "
+    networks:
+      - pedidos360-net
+
+networks:
+  pedidos360-net:
+    external: true
