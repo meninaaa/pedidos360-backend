@@ -34,17 +34,11 @@ Actualmente, el sistema utiliza **H2 Database** (bases de datos relacionales en 
 
 El proyecto está diseñado para funcionar nativamente en la nube de Amazon Web Services (AWS):
 
-### 5.1. Construcción del Artefacto
-Generar el empaquetado `.jar` autoejecutable (Fat JAR) prescindiendo de los tests de integración:
-```bash
-./mvnw clean package -DskipTests
-5.2. Despliegue en Instancias EC2
-Una vez transferido el artefacto a la instancia Linux/Ubuntu, se levanta el servicio en background para aislarlo de la sesión SSH del terminal:
+### 5.1. Despliegue en Instancias EC2
+Una vez transferido el artefacto .jar a la instancia Linux/Ubuntu, se levantó el servicio en background para aislarlo de la sesión SSH del terminal:
 
-Bash
-nohup java -jar target/pedidos360-backend.jar > application-logs.log 2>&1 &
 Regla de Seguridad: El Security Group de la EC2 debe tener habilitado el Inbound Port TCP 8080.
 
-5.3. Exposición mediante AWS API Gateway
+###5.2. Exposición mediante AWS API Gateway
 
-El comodín {proxy+} asegura que todas las rutas internas de los microservicios (/api/bff/orders, /api/bff/catalog) se resuelvan dinámicamente, actuando como un puente transparente entre Angular y el servidor EC2.
+El comodín {proxy+} asegura que todas las rutas internas de los microservicios (/api/bff/orders, /api/bff/catalog) se resuelvan dinámicamente, actuando como un puente transparente entre Angular y el servidor EC2. 
