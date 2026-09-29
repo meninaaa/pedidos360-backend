@@ -23,6 +23,16 @@ Cuando una orden cambia de estado (ej. un Operador presiona "Despachar"), el ser
 2.  *Orders* actúa como **Productor** y dispara un evento (ej. `OrderStatusChangedEvent`) al Broker de mensajería.
 3.  Inmediatamente, *Orders* responde un `200 OK` al frontend. El usuario no sufre tiempos de espera.
 
+el flujo seria:
+### Microservicio de Órdenes (orders-pedidos360) - El Productor:
+Cuando un cliente crea un pedido, o cuando el Operador Logístico presiona el botón "Aceptar" o "Despachar" en tu frontend, este microservicio hace su trabajo principal (guardar en su base de datos) e inmediatamente emite un evento a RabbitMQ (por ejemplo, enviando un objeto JSON que dice "El pedido #4 cambió a estado ACEPTADO por el usuario X"). Una vez emitido el mensaje, el servicio de órdenes se olvida del tema y le responde "Éxito" a tu frontend.
+
+### Microservicio de Auditoría (audit-pedidos360) - El Consumidor:
+Este servicio está conectado a RabbitMQ "escuchando" (a través de la anotación @RabbitListener en Spring Boot) una cola específica (ej. audit.queue). Cuando RabbitMQ recibe el evento de Órdenes, se lo empuja a Auditoría. Auditoría lo procesa en segundo plano y lo guarda en su propia tabla para que luego tú lo veas en la pantalla de "Timeline de Auditoría".
+
+### Microservicio de Reportería (report-pedidos360) - Consumidor Secundario:
+De manera similar a la auditoría, tu servicio de métricas probablemente escucha eventos como "Pedido_Creado" o "Pedido_Entregado" para ir calculando y actualizando las cifras de "Ventas Totales" o el "Top de Productos" en tiempo real, sin tener que hacer consultas pesadas a la base de datos de órdenes cada vez que entras al Dashboard.
+
 ### 3.2. Roles de RabbitMQ y Kafka en el Ecosistema
 *   **RabbitMQ (Task/Work Queues):** Ideal para tareas de enrutamiento exacto y procesamiento garantizado. Se utiliza para el **Audit Service**. Cuando ocurre una acción crítica, se encola en RabbitMQ. El microservicio de auditoría actúa como **Consumidor**, toma el mensaje de la cola, lo procesa y lo guarda en la base de datos de trazas. Si el servicio de auditoría se cae, RabbitMQ retiene los mensajes; al volver a encenderse, procesa todo el historial pendiente asegurando que **ningún log se pierda** (Tolerancia a fallos).
 *   **Kafka (Event Streaming):** Utilizado para el procesamiento masivo de datos en tiempo real (High Throughput). El **Reports Service** se suscribe a los Tópicos de Kafka (Topics) para ir construyendo proyecciones de datos (CQRS). A medida que Kafka emite flujos ininterrumpidos de ventas, el servicio de reportería va recalculando los "Top Productos" y "Ventas por Hora" en memoria y guardándolos en base de datos, lo que permite que el Dashboard del frontend cargue en milisegundos.
