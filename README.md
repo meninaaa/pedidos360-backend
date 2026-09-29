@@ -23,7 +23,7 @@ Cuando una orden cambia de estado (ej. un Operador presiona "Despachar"), el ser
 2.  *Orders* actúa como **Productor** y dispara un evento (ej. `OrderStatusChangedEvent`) al Broker de mensajería.
 3.  Inmediatamente, *Orders* responde un `200 OK` al frontend. El usuario no sufre tiempos de espera.
 
-el flujo seria:
+### El flujo seria:
 ### Microservicio de Órdenes (orders-pedidos360) - El Productor:
 Cuando un cliente crea un pedido, o cuando el Operador Logístico presiona el botón "Aceptar" o "Despachar" en tu frontend, este microservicio hace su trabajo principal (guardar en su base de datos) e inmediatamente emite un evento a RabbitMQ (por ejemplo, enviando un objeto JSON que dice "El pedido #4 cambió a estado ACEPTADO por el usuario X"). Una vez emitido el mensaje, el servicio de órdenes se olvida del tema y le responde "Éxito" a tu frontend.
 
