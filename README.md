@@ -1,80 +1,50 @@
-# Pedidos360 - Backend & BFF (Spring Boot)
+# Pedidos360 - Backend & BFF/microservicios (Spring Boot)
 
-Sistema central y arquitectura de microservicios desarrollada en **Spring Boot**. Este repositorio contiene la lógica de negocio modularizada, la persistencia de datos y el **BFF (Backend For Frontend)**, el cual actúa como orquestador y punto de entrada seguro para la aplicación cliente, facilitando la integración con la infraestructura cloud.
+## 1. Resumen Ejecutivo
+El backend de **Pedidos360** es un ecosistema de microservicios distribuidos desarrollados en **Spring Boot (Java)**. Está diseñado bajo los principios de alta cohesión, bajo acoplamiento y escalabilidad horizontal. Cuenta con un **BFF (Backend For Frontend)** como puerta de enlace lógica y utiliza una **Arquitectura Orientada a Eventos (EDA)** apoyada en Message Brokers (RabbitMQ / Kafka) para garantizar la resiliencia y el procesamiento asíncrono de grandes volúmenes de datos logísticos.
 
----
+## 2. Topología de Microservicios
 
-## Características Principales
+El sistema está fragmentado en dominios de negocio específicos (Domain-Driven Design):
 
-* **Arquitectura Backend For Frontend (BFF):** Centraliza y optimiza las peticiones del cliente (Angular), reduciendo el acoplamiento y manejando la comunicación interna con los microservicios subyacentes (Orders, Catalog, Audit, Reports).
-* **Seguridad y Procesamiento JWT:** Implementación de decodificación y validación de tokens JWT en la capa de controladores del BFF. Extracción segura de claims y roles corporativos provenientes de Azure AD/MSAL.
-* **Enrutamiento Basado en Roles (RBAC):** Resolución dinámica de endpoints dependiendo de los privilegios del usuario autenticado:
-    * **Admin:** Acceso a `/api/orders` (Gestión total).
-    * **Operator:** Acceso a `/api/orders/pending` (Gestión operativa).
-    * **Customer:** Acceso a `/api/orders/me` (Aislamiento de datos por cliente).
-* **Persistencia y Sincronización:** Uso de base de datos relacional H2 (en memoria) para el almacenamiento eficiente de registros logísticos, ideal para entornos de desarrollo y pruebas de concepto rápidas.
+1.  **BFF (Backend For Frontend):** Es el orquestador principal. Recibe la petición del frontend (Angular), decodifica y audita el token JWT de Azure AD, extrae los claims (roles, email) de forma segura a través de `ObjectMapper`, y enruta la petición al microservicio correspondiente con las cabeceras inyectadas.
+2.  **Orders Service (Pedidos):** Núcleo transaccional. Maneja la máquina de estados de los envíos (Creado, Aceptado, En Preparación, Despachado).
+3.  **Catalog Service (Catálogo):** Gestiona el inventario, precios y disponibilidad de SKUs.
+4.  **Audit Service (Auditoría):** Microservicio pasivo que registra una traza inmutable de quién hizo qué y cuándo.
+5.  **Reports Service (Reportería):** Agregador de datos que calcula KPIs, tendencias de Lead Time y top de ventas.
 
----
+## 3. Arquitectura Orientada a Eventos: Kafka y RabbitMQ
 
-## Arquitectura y Componentes Técnicos
+Para evitar cuellos de botella y acoplamiento sincrónico, el ecosistema utiliza un **sistema de mensajería asíncrona**. 
 
-* **Framework Principal:** Spring Boot (Java).
-* **Gestión de Dependencias y Build:** Maven (Wrapper incluido).
-* **Contenedores y Cloud:** Preparado para ejecución nativa en instancias de **AWS EC2** y exposición a través de **AWS API Gateway**.
-* **Documentación de API:** Integración nativa con `springdoc-openapi` para la generación de contratos Swagger.
+### 3.1. ¿Por qué se utilizan Message Brokers?
+Cuando una orden cambia de estado (ej. un Operador presiona "Despachar"), el servicio de *Orders* no hace una petición HTTP directa a *Audit* o *Reports*. En su lugar, el flujo es el siguiente:
+1.  *Orders* guarda el estado en su base de datos.
+2.  *Orders* actúa como **Productor** y dispara un evento (ej. `OrderStatusChangedEvent`) al Broker de mensajería.
+3.  Inmediatamente, *Orders* responde un `200 OK` al frontend. El usuario no sufre tiempos de espera.
 
----
+### 3.2. Roles de RabbitMQ y Kafka en el Ecosistema
+*   **RabbitMQ (Task/Work Queues):** Ideal para tareas de enrutamiento exacto y procesamiento garantizado. Se utiliza para el **Audit Service**. Cuando ocurre una acción crítica, se encola en RabbitMQ. El microservicio de auditoría actúa como **Consumidor**, toma el mensaje de la cola, lo procesa y lo guarda en la base de datos de trazas. Si el servicio de auditoría se cae, RabbitMQ retiene los mensajes; al volver a encenderse, procesa todo el historial pendiente asegurando que **ningún log se pierda** (Tolerancia a fallos).
+*   **Kafka (Event Streaming):** Utilizado para el procesamiento masivo de datos en tiempo real (High Throughput). El **Reports Service** se suscribe a los Tópicos de Kafka (Topics) para ir construyendo proyecciones de datos (CQRS). A medida que Kafka emite flujos ininterrumpidos de ventas, el servicio de reportería va recalculando los "Top Productos" y "Ventas por Hora" en memoria y guardándolos en base de datos, lo que permite que el Dashboard del frontend cargue en milisegundos.
 
-## Documentación de API y Swagger
+## 4. Persistencia de Datos
+Actualmente, el sistema utiliza **H2 Database** (bases de datos relacionales en memoria) por cada microservicio. Esto garantiza el aislamiento de datos (Data Sovereignty) exigido por el patrón microservicios y permite un despliegue ágil en entornos de prueba y desarrollo.
 
-El BFF expone los contratos de comunicación mediante **Swagger / OpenAPI**. Esta documentación interactiva permite a los desarrolladores del frontend y a los integradores visualizar los endpoints disponibles, los esquemas de petición/respuesta y los requisitos de autorización (Bearer Token).
+## 5. Despliegue en Infraestructura AWS (Cloud)
 
-Para acceder a la consola interactiva de Swagger:
+El proyecto está diseñado para funcionar nativamente en la nube de Amazon Web Services (AWS):
 
-> **Entorno Local:** `http://localhost:8080/swagger-ui.html`
-> 
-> **Entorno de Producción (AWS EC2):** `https://3lgyldt561.execute-api.us-east-1.amazonaws.com/swagger-ui/index.html`
-
-*Nota de infraestructura:* Asegúrate de que el Security Group de la instancia EC2 tenga habilitado el tráfico de entrada (Inbound Rules) en el puerto TCP `8080` para permitir la visualización pública de esta interfaz.
-
----
-
-## Prerrequisitos de Entorno
-
-Para compilar y ejecutar este proyecto de forma local, se requiere:
-
-* **Java Development Kit (JDK):** Versión 17 o superior.
-* **Git:** Para el control de versiones.
-* *(Nota: No es necesario tener Maven instalado globalmente, el proyecto incluye el wrapper `./mvnw`)*.
-
----
-
-## Configuración y Ejecución Local
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/meninaaa/pedidos360-backend.git
-   cd pedidos360-backend
-Compilar el proyecto y descargar dependencias:
-
-Bash
-./mvnw clean install
-Ejecutar la aplicación Spring Boot:
-
-Bash
-./mvnw spring-boot:run
-El servicio iniciará y estará disponible para recibir peticiones en el puerto 8080.
-
-Despliegue en AWS (EC2 y API Gateway)
-El sistema está diseñado para integrarse fácilmente en el ecosistema de Amazon Web Services. Sigue estos pasos para un despliegue estándar en producción:
-
-1. Empaquetado de Producción
-Genera el archivo ejecutable unificado (.jar) que contiene el servidor web embebido:
-
-Bash
+### 5.1. Construcción del Artefacto
+Generar el empaquetado `.jar` autoejecutable (Fat JAR) prescindiendo de los tests de integración:
+```bash
 ./mvnw clean package -DskipTests
-2. Despliegue en AWS EC2
-Transfiere el archivo empaquetado (ubicado en la carpeta target/) a tu instancia de AWS EC2. Para mantener el servicio en ejecución en segundo plano incluso al cerrar la sesión SSH, conéctate a tu instancia y ejecuta:
+5.2. Despliegue en Instancias EC2
+Una vez transferido el artefacto a la instancia Linux/Ubuntu, se levanta el servicio en background para aislarlo de la sesión SSH del terminal:
 
 Bash
-nohup java -jar target/pedidos360-backend.jar > app.log 2>&1 &
+nohup java -jar target/pedidos360-backend.jar > application-logs.log 2>&1 &
+Regla de Seguridad: El Security Group de la EC2 debe tener habilitado el Inbound Port TCP 8080.
+
+5.3. Exposición mediante AWS API Gateway
+
+El comodín {proxy+} asegura que todas las rutas internas de los microservicios (/api/bff/orders, /api/bff/catalog) se resuelvan dinámicamente, actuando como un puente transparente entre Angular y el servidor EC2.
