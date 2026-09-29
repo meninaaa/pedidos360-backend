@@ -28,7 +28,7 @@ Cuando una orden cambia de estado (ej. un Operador presiona "Despachar"), el ser
 *   **Kafka (Event Streaming):** Utilizado para el procesamiento masivo de datos en tiempo real (High Throughput). El **Reports Service** se suscribe a los Tópicos de Kafka (Topics) para ir construyendo proyecciones de datos (CQRS). A medida que Kafka emite flujos ininterrumpidos de ventas, el servicio de reportería va recalculando los "Top Productos" y "Ventas por Hora" en memoria y guardándolos en base de datos, lo que permite que el Dashboard del frontend cargue en milisegundos.
 
 ## 4. Persistencia de Datos
-Actualmente, el sistema utiliza **H2 Database** (bases de datos relacionales en memoria) por cada microservicio. Esto garantiza el aislamiento de datos (Data Sovereignty) exigido por el patrón microservicios y permite un despliegue ágil en entornos de prueba y desarrollo.
+Actualmente, el sistema utiliza **H2 Database** (bases de datos relacionales en memoria) de Oracle por cada microservicio. Esto garantiza el aislamiento de datos (Data Sovereignty) exigido por el patrón microservicios y permite un despliegue ágil en entornos de prueba y desarrollo.
 
 ## 5. Despliegue en Infraestructura AWS (Cloud)
 
