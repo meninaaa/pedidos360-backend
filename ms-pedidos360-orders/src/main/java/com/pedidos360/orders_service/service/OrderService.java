@@ -6,10 +6,16 @@ import com.pedidos360.orders_service.entity.Order;
 import com.pedidos360.orders_service.repository.OrderRepository;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,7 +69,7 @@ public class OrderService {
         order.setStatus(newStatus);
         Order updatedOrder = orderRepository.save(order);
 
-        // Regla de Negocio: Coordinación de stock al ACEPTAR pedido
+        // Regla de Negocio: Descontar stock al ACEPTAR el pedido
         if (newStatus == Order.OrderStatus.ACEPTADO) {
             coordinarDescuentoStock(updatedOrder);
         }
@@ -79,12 +85,38 @@ public class OrderService {
 
     private void coordinarDescuentoStock(Order order) {
         try {
-            // NOTA: Como el modelo Order no tiene líneas de detalle aún, esto queda estructuralmente listo.
-            // Iterar sobre order.getItems() cuando se agreguen al modelo:
-            System.out.println("📦 [STOCK] Coordinando descuento de stock para el pedido: " + order.getId());
-            // restTemplate.put(catalogUrl + "/api/catalog/products/{productId}/reduceStock?quantity={qty}", null);
+            System.out.println("📦 [STOCK] Iniciando descuento de stock para el pedido: " + order.getId());
+
+            Long productId = order.getProductId();
+            
+            if (productId != null) {
+                int quantity = 1; // Como el front no envía cantidad, asumimos 1 unidad por pedido
+                String url = catalogUrl + "/api/catalog/products/" + productId + "/reduce-stock?quantity=" + quantity;
+                
+                // 1. Capturamos el token JWT de la petición original
+                ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                HttpHeaders headers = new HttpHeaders();
+                
+                if (attributes != null) {
+                    HttpServletRequest request = attributes.getRequest();
+                    String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
+                    if (authHeader != null) {
+                        headers.set(HttpHeaders.AUTHORIZATION, authHeader);
+                    }
+                }
+
+                // 2. Empaquetamos la petición con la cabecera de seguridad
+                HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+                // 3. Usamos exchange para enviar el método PUT con el token JWT a Catálogo
+                restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);
+                
+                System.out.println("✅ [STOCK] Éxito: Se descontó 1 unidad del producto ID " + productId);
+            } else {
+                System.err.println("⚠ [STOCK] El pedido no tiene un producto asociado.");
+            }
         } catch (Exception e) {
-            System.err.println("Error al coordinar stock con el catálogo: " + e.getMessage());
+            System.err.println("❌ [STOCK] Error al coordinar stock con el catálogo: " + e.getMessage());
         }
     }
 
@@ -93,9 +125,9 @@ public class OrderService {
             String eventPayload = mapper.writeValueAsString(order);
             kafkaTemplate.send("orders.events", eventPayload);
             kafkaTemplate.send("audit.timeline", eventPayload);
-            System.out.println("🚀 [KAFKA] Evento emitido a ambos tópicos: Pedido " + order.getId() + " cambió a " + order.getStatus());
+            System.out.println("🚀 [KAFKA] Evento emitido: Pedido " + order.getId() + " cambió a " + order.getStatus());
         } catch (Exception e) {
-            System.err.println("Error al serializar evento Kafka: " + e.getMessage());
+            System.err.println("❌ Error al serializar evento Kafka: " + e.getMessage());
         }
     }
 
@@ -111,7 +143,6 @@ public class OrderService {
         payload.put("mensaje", mensaje);
         envelope.put("payload", payload);
 
-        // Uso correcto de topology directa exigida
         rabbitTemplate.convertAndSend("cmd.direct", "email.send", envelope);
     }
 }
