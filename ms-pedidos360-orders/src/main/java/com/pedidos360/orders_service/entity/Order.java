@@ -11,7 +11,10 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String customerId; // Podría venir del JWT
+    private String customerId;
+    
+    // Este campo recibe el productId que envía tu Angular
+    private Long productId; 
 
     @Enumerated(EnumType.STRING)
     private OrderStatus status;
@@ -28,7 +31,6 @@ public class Order {
         this.status = OrderStatus.CREADO;
     }
     
-    // Garantiza que la fecha de creación se asigne justo antes de guardar en la DB
     @PrePersist
     protected void onCreate() {
         if (this.createdAt == null) {
@@ -42,6 +44,9 @@ public class Order {
     
     public String getCustomerId() { return customerId; }
     public void setCustomerId(String customerId) { this.customerId = customerId; }
+
+    public Long getProductId() { return productId; }
+    public void setProductId(Long productId) { this.productId = productId; }
     
     public OrderStatus getStatus() { return status; }
     public void setStatus(OrderStatus status) { this.status = status; }
