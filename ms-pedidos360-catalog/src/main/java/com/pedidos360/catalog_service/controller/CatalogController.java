@@ -50,6 +50,22 @@ public class CatalogController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    // NUEVO ENDPOINT: Descuento dinámico de stock
+    @PutMapping("/products/{id}/reduce-stock")
+    @Operation(summary = "Reducir stock", description = "Descuenta la cantidad vendida del stock disponible del producto.")
+    public ResponseEntity<?> reduceStock(@PathVariable Long id, @RequestParam int quantity) {
+        return productRepository.findById(id)
+            .map(product -> {
+                if (product.getStock() < quantity) {
+                    return ResponseEntity.badRequest().body("Stock insuficiente para el producto: " + product.getNombre());
+                }
+                product.setStock(product.getStock() - quantity);
+                productRepository.save(product);
+                return ResponseEntity.ok(product);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
     @DeleteMapping("/products/{id}")
     @Operation(summary = "Eliminar producto", description = "Elimina un producto del catálogo por su ID.")
     public ResponseEntity<Void> deleteProduct(@PathVariable Long id) {
