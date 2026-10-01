@@ -86,29 +86,40 @@ public class OrderService {
     private void coordinarDescuentoStock(Order order) {
         try {
             System.out.println("📦 [STOCK] Iniciando descuento de stock para el pedido: " + order.getId());
-
             Long productId = order.getProductId();
             
             if (productId != null) {
-                int quantity = 1; // Como el front no envía cantidad, asumimos 1 unidad por pedido
+                int quantity = 1;
                 String url = catalogUrl + "/api/catalog/products/" + productId + "/reduce-stock?quantity=" + quantity;
                 
-                // 1. Capturamos el token JWT de la petición original
                 ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
                 HttpHeaders headers = new HttpHeaders();
                 
                 if (attributes != null) {
                     HttpServletRequest request = attributes.getRequest();
-                    String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-                    if (authHeader != null) {
-                        headers.set(HttpHeaders.AUTHORIZATION, authHeader);
+                    
+                    // MODO DETECTIVE: Escaneamos si el BFF nos mandó el token
+                    System.out.println("🔍 [DEBUG] Buscando el token JWT en las cabeceras de la petición...");
+                    java.util.Enumeration<String> headerNames = request.getHeaderNames();
+                    boolean hasAuth = false;
+                    
+                    while (headerNames != null && headerNames.hasMoreElements()) {
+                        String headerName = headerNames.nextElement();
+                        if (headerName.toLowerCase().contains("authorization")) {
+                            hasAuth = true;
+                            String authHeader = request.getHeader(headerName);
+                            System.out.println("🔑 [DEBUG] ¡Token JWT encontrado! Pasándolo al Catálogo...");
+                            headers.set(HttpHeaders.AUTHORIZATION, authHeader);
+                            break;
+                        }
+                    }
+                    
+                    if (!hasAuth) {
+                        System.err.println("⚠ [FATAL] El microservicio ms-orders NO recibió el token. Tu BFF (o API Gateway) está borrando la cabecera 'Authorization' al enrutar.");
                     }
                 }
 
-                // 2. Empaquetamos la petición con la cabecera de seguridad
                 HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-                // 3. Usamos exchange para enviar el método PUT con el token JWT a Catálogo
                 restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);
                 
                 System.out.println("✅ [STOCK] Éxito: Se descontó 1 unidad del producto ID " + productId);
@@ -119,7 +130,7 @@ public class OrderService {
             System.err.println("❌ [STOCK] Error al coordinar stock con el catálogo: " + e.getMessage());
         }
     }
-
+    
     private void publicarEventoKafka(Order order) {
         try {
             String eventPayload = mapper.writeValueAsString(order);
