@@ -21,6 +21,10 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 // Swagger y documentación abiertos para pruebas
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                
+                // ✅ NUEVA REGLA: Dejamos pasar libremente a Transbank hacia Órdenes
+                .requestMatchers("/api/payments/**").permitAll()
+                
                 // Toda otra petición exige autenticación mediante Token JWT de Azure AD
                 .anyRequest().authenticated()
             )

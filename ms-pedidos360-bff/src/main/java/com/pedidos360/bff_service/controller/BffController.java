@@ -153,6 +153,51 @@ public class BffController {
     }
 
     // ==========================================
+    // Filtrar pedidos por cliente
+    // ==========================================
+    @GetMapping("/orders/customer")
+    public ResponseEntity<?> getOrdersByCustomer(@RequestParam String email, @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        HttpEntity<Object> entity = createHttpEntity(null, authHeader);
+        String url = ordersUrl + "/api/orders/customer?email=" + email;
+        return restTemplate.exchange(url, HttpMethod.GET, entity, Object.class);
+    }
+
+    // ==========================================
+    // PUENTES PARA WEBPAY (TRANSBANK)
+    // ==========================================
+    @PostMapping("/payments/create")
+    public ResponseEntity<?> createPayment(@RequestParam double amount, @RequestParam String orderId, @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        HttpEntity<Object> entity = createHttpEntity(null, authHeader);
+        String url = ordersUrl + "/api/payments/create?amount=" + amount + "&orderId=" + orderId;
+        return restTemplate.exchange(url, HttpMethod.POST, entity, Object.class);
+    }
+
+    @GetMapping("/payments/commit")
+    public void commitPayment(
+            @RequestParam(value = "token_ws", required = false) String tokenWs,
+            @RequestParam(value = "TBK_TOKEN", required = false) String tbkToken,
+            jakarta.servlet.http.HttpServletResponse response) throws Exception {
+
+        String url = ordersUrl + "/api/payments/commit?";
+        if (tokenWs != null) url += "token_ws=" + tokenWs;
+        if (tbkToken != null) url += "TBK_TOKEN=" + tbkToken;
+
+        try {
+            // Hacemos un GET hacia el microservicio de órdenes
+            Map<String, String> result = restTemplate.getForObject(url, Map.class);
+
+            if (result != null && result.containsKey("url")) {
+                response.sendRedirect(result.get("url"));
+            } else {
+                response.sendRedirect("http://localhost:4200/payment-result?status=failed");
+            }
+        } catch (Exception e) {
+            System.err.println("Error en el BFF al procesar commit: " + e.getMessage());
+            response.sendRedirect("http://localhost:4200/payment-result?status=failed");
+        }
+    }
+
+    // ==========================================
     // MÓDULO DE CATÁLOGO (CATALOG)
     // ==========================================
 
@@ -219,4 +264,5 @@ public class BffController {
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
         return restTemplate.exchange(reportUrl + "/api/reports/top-productos", HttpMethod.GET, entity, Object.class);
     }
+
 }

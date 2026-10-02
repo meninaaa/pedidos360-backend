@@ -18,6 +18,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -56,6 +57,11 @@ public class OrderService {
         return savedOrder;
     }
 
+    // ✅ CORRECCIÓN: Método para retornar los pedidos filtrados por cliente
+    public List<Order> getOrdersByCustomer(String customerId) {
+        return orderRepository.findByCustomerId(customerId);
+    }
+
     public Order updateOrderStatus(Long orderId, Order.OrderStatus newStatus) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Pedido no encontrado"));
@@ -69,7 +75,6 @@ public class OrderService {
         order.setStatus(newStatus);
         Order updatedOrder = orderRepository.save(order);
 
-        // Regla de Negocio: Descontar stock al ACEPTAR el pedido
         if (newStatus == Order.OrderStatus.ACEPTADO) {
             coordinarDescuentoStock(updatedOrder);
         }
@@ -98,7 +103,6 @@ public class OrderService {
                 if (attributes != null) {
                     HttpServletRequest request = attributes.getRequest();
                     
-                    // MODO DETECTIVE: Escaneamos si el BFF nos mandó el token
                     System.out.println("🔍 [DEBUG] Buscando el token JWT en las cabeceras de la petición...");
                     java.util.Enumeration<String> headerNames = request.getHeaderNames();
                     boolean hasAuth = false;

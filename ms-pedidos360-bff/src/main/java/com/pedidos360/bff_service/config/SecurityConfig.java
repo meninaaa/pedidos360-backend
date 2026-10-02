@@ -37,6 +37,10 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                
+                // ✅ NUEVA REGLA: Dejamos pasar libremente a Transbank hacia el BFF
+                .requestMatchers("/api/bff/payments/**").permitAll() 
+                
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )
