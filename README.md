@@ -18,6 +18,87 @@ Este repositorio contiene el backend completo. El frontend (Angular 18 + MSAL) v
 | Kafka + Zookeeper | 9092 / 29092 interno | Event streaming de eventos de negocio. |
 | RabbitMQ | 5672 (AMQP) / 15672 (consola) | Mensajería de comandos de trabajo. |
 
+## Diagramas
+
+### Arquitectura general
+
+```mermaid
+graph LR
+    FE["Angular 18 + MSAL<br/>(repo frontend)"] -->|JWT Bearer| GW["AWS API Gateway<br/>HTTP API + JWT Authorizer"]
+    GW --> BFF["ms-pedidos360-bff :8080"]
+    BFF --> ORD["ms-pedidos360-orders :8081"]
+    BFF --> CAT["ms-pedidos360-catalog :8082"]
+    BFF --> AUD["ms-pedidos360-audit :8084"]
+    BFF --> REP["ms-pedidos360-report :8085"]
+    ORD -->|PUT reduce-stock| CAT
+    ORD -->|orders.events + audit.timeline| KAFKA[("Kafka")]
+    KAFKA --> AUD
+    KAFKA --> REP
+    ORD -->|cmd.direct / email.send| MQ[("RabbitMQ")]
+    MQ --> NOT["ms-pedidos360-notify"]
+    ORD -->|create / commit| TBK["Transbank Webpay Plus"]
+
+    AZ["Azure AD / Entra ID"] -.->|emite JWT| FE
+    GW -.->|valida issuer/audience| AZ
+    ORD --> DB1[("Oracle")]
+    CAT --> DB2[("Oracle")]
+    AUD --> DB3[("Oracle")]
+    REP --> DB4[("Oracle")]
+```
+
+### Secuencia: creación y pago de un pedido
+
+```mermaid
+sequenceDiagram
+    actor Cliente
+    participant FE as Angular
+    participant BFF as ms-bff
+    participant ORD as ms-orders
+    participant CAT as ms-catalog
+    participant K as Kafka
+    participant TBK as Transbank
+
+    Cliente->>FE: Crear pedido
+    FE->>BFF: POST /api/orders (JWT)
+    BFF->>ORD: POST /api/orders (JWT)
+    ORD->>ORD: createOrder() -> estado CREADO
+    ORD->>K: publicarEventoKafka() -> orders.events + audit.timeline
+    ORD-->>FE: 201 Created
+
+    Cliente->>FE: Pagar
+    FE->>BFF: POST /api/payments/create (JWT)
+    BFF->>ORD: POST /api/payments/create (JWT)
+    ORD->>TBK: POST /transactions
+    TBK-->>ORD: url + token_ws
+    ORD-->>FE: url + token_ws
+    FE->>TBK: Form POST (redirección)
+    TBK-->>Cliente: Formulario de pago
+
+    Cliente->>TBK: Ingresa tarjeta
+    TBK->>ORD: POST /api/payments/commit (sin JWT)
+    ORD->>TBK: PUT /transactions/{token}
+    TBK-->>ORD: status AUTHORIZED
+    ORD->>ORD: updateOrderStatus(ACEPTADO)
+    ORD->>CAT: PUT reduce-stock
+    ORD->>K: publicarEventoKafka()
+    ORD-->>Cliente: Redirect /payment-result
+```
+
+### Topología de mensajería
+
+```mermaid
+graph TB
+    subgraph Kafka
+        T1["orders.events"] --> REP["ms-report (report-group)"]
+        T2["audit.timeline"] --> AUD["ms-audit (audit-group)"]
+    end
+    subgraph RabbitMQ
+        EX["cmd.direct"] -->|email.send| Q1["q.cmd.email"]
+        Q1 --> NOT["ms-notify"]
+        Q1 -.fallo.-> DLQ1["q.cmd.email.dlq"]
+    end
+```
+
 ## Flujo principal de un pedido
 
 1. El cliente llama a `ms-pedidos360-bff` con un token JWT emitido por Azure AD.
