@@ -45,10 +45,16 @@ public class WebpayController {
         headers.set("Tbk-Api-Key-Secret", apiKey);
         headers.set("Content-Type", "application/json");
 
+        // 1. Transbank rechaza montos con decimales en CLP. Forzamos entero puro (ej: 5000000 en vez de 5000000.0)
+        long montoEntero = Math.round(amount);
+
+        // 2. Generamos un buy_order único para evitar que Transbank rechace por ID repetido en pruebas
+        String buyOrderUnique = orderId + "-" + System.currentTimeMillis();
+
         Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("buy_order", orderId);
+        requestBody.put("buy_order", buyOrderUnique);
         requestBody.put("session_id", "sesion-" + orderId);
-        requestBody.put("amount", amount);
+        requestBody.put("amount", montoEntero);
         requestBody.put("return_url", publicApiBaseUrl + "/payments/commit");
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
@@ -91,7 +97,9 @@ public class WebpayController {
 
             if ("AUTHORIZED".equals(status) && buyOrder != null) {
                 try {
-                    Long orderId = Long.parseLong(buyOrder);
+                    // Extraemos el ID original de la orden antes del guion
+                    String realIdStr = buyOrder.contains("-") ? buyOrder.split("-")[0] : buyOrder;
+                    Long orderId = Long.parseLong(realIdStr);
                     orderService.updateOrderStatus(orderId, Order.OrderStatus.ACEPTADO);
                 } catch (Exception e) {
                     System.err.println("⚠ [WEBPAY] Pago autorizado pero no se pudo actualizar el pedido " + buyOrder + ": " + e.getMessage());
