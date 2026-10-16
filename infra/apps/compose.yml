@@ -17,15 +17,42 @@ services:
     networks:
       - pedidos360-net
 
-  rabbitmq:
+  rabbit1:
     image: rabbitmq:3.13-management
-    container_name: rabbitmq-pedidos360
+    container_name: rabbit1-pedidos360
+    hostname: rabbit1
     ports:
       - "5672:5672"
       - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_ERLANG_COOKIE: "pedidos360_secret_cookie"
+    networks:
+      - pedidos360-net
+
+  rabbit2:
+    image: rabbitmq:3.13-management
+    container_name: rabbit2-pedidos360
+    hostname: rabbit2
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_ERLANG_COOKIE: "pedidos360_secret_cookie"
+    command: >
+      bash -c "
+        rabbitmq-server -detached &&
+        sleep 10 &&
+        rabbitmqctl stop_app &&
+        rabbitmqctl join_cluster rabbit@rabbit1 &&
+        rabbitmqctl start_app &&
+        tail -f /var/log/rabbitmq/*.log
+      "
+    depends_on:
+      - rabbit1
     networks:
       - pedidos360-net
 
@@ -70,7 +97,6 @@ services:
       - "8082:8082"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
-    ##restart: on-failure
     depends_on:
       oracle-db:
         condition: service_healthy
@@ -86,13 +112,12 @@ services:
       - "8081:8081"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
-      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_RABBITMQ_HOST=rabbit1-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    ##restart: on-failure
     depends_on:
       oracle-db:
         condition: service_healthy
-      rabbitmq:
+      rabbit1:
         condition: service_started
       kafka:
         condition: service_healthy
@@ -107,11 +132,10 @@ services:
     ports:
       - "8083:8083"
     environment:
-      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_RABBITMQ_HOST=rabbit1-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    #restart: on-failure
     depends_on:
-      - rabbitmq
+      - rabbit1
       - kafka
     networks:
       - pedidos360-net
@@ -124,11 +148,10 @@ services:
     ports:
       - "8084:8084"
     environment:
-      - SPRING_RABBITMQ_HOST=rabbitmq-pedidos360
+      - SPRING_RABBITMQ_HOST=rabbit1-pedidos360
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka-pedidos360:29092
-    #restart: on-failure
     depends_on:
-      rabbitmq:
+      rabbit1:
         condition: service_started
       kafka:
         condition: service_healthy
@@ -144,7 +167,6 @@ services:
       - "8085:8085"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:oracle:thin:@oracle-pedidos360:1521/XEPDB1
-    #restart: on-failure
     depends_on:
       oracle-db:
         condition: service_healthy
@@ -165,7 +187,6 @@ services:
       - ORDERS_SERVICE_URL=http://orders-pedidos360:8081
       - AUDIT_SERVICE_URL=http://audit-pedidos360:8084
       - REPORT_SERVICE_URL=http://report-pedidos360:8085
-    #restart: on-failure
     depends_on:
       - ms-catalog
       - ms-orders
