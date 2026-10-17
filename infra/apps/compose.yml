@@ -175,6 +175,20 @@ services:
     networks:
       - pedidos360-net
 
+  ms-admin:
+    build:
+      context: ../../ms-pedidos360-rabbit-admin
+      dockerfile: Dockerfile
+    container_name: admin-pedidos360
+    ports:
+      - "8086:8086"
+    environment:
+      - SPRING_RABBITMQ_HOST=rabbit1-pedidos360
+    depends_on:
+      - rabbit1
+    networks:
+      - pedidos360-net
+
   bff-service:
     build: 
       context: ../../ms-pedidos360-bff
