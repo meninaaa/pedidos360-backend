@@ -44,12 +44,13 @@ services:
       RABBITMQ_ERLANG_COOKIE: "pedidos360_secret_cookie"
     command: >
       bash -c "
-        rabbitmq-server -detached &&
-        sleep 10 &&
+        rabbitmq-server &
+        sleep 15 &&
+        rabbitmqctl wait /var/lib/rabbitmq/mnesia/rabbit@rabbit2.pid &&
         rabbitmqctl stop_app &&
         rabbitmqctl join_cluster rabbit@rabbit1 &&
         rabbitmqctl start_app &&
-        tail -f /var/log/rabbitmq/*.log
+        wait
       "
     depends_on:
       - rabbit1
