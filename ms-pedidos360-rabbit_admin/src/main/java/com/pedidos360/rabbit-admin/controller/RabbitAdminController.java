@@ -1,8 +1,6 @@
-package com.pedidos360.admin_service.controller;
+package com.pedidos360.rabbit_admin.controller;
 
-import com.pedidos360.admin_service.service.RabbitAdminService;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
+import com.pedidos360.rabbit_admin.service.RabbitAdminService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,7 +19,7 @@ public class RabbitAdminController {
     @PostMapping("/queues")
     public ResponseEntity<?> createQueue(@RequestBody Map<String, String> body) {
         String name = body.get("name");
-        if (name == null || name.trim().isEmpty()) {
+        if (name == null  name.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "El nombre de la cola no puede estar vacío"));
         }
         adminService.createQueue(name);
@@ -30,7 +28,8 @@ public class RabbitAdminController {
 
     @DeleteMapping("/queues/{name}")
     public ResponseEntity<?> deleteQueue(@PathVariable String name) {
-        if (name == null || name.trim().isEmpty()) {
+        if (name == null 
+ name.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Nombre de cola inválido"));
         }
         adminService.deleteQueue(name);
