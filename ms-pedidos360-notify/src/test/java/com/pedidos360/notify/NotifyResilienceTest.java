@@ -116,4 +116,13 @@ class NotifyResilienceTest {
         assertTrue(channelHandler.nackCalled);
         assertFalse(channelHandler.requeue);
     }
+
+    // 4. SUITE COMPLETA / ERROR RECUPERABLE (Prueba 10)
+    @Test
+    void cuandoErrorRecuperable_entoncesReintentaYVaADlq() throws Exception {
+        messageProperties.setDeliveryTag(401L);
+        assertDoesNotThrow(() -> notificationListener.processEmailCommand(null, channelProxy, message));
+        assertTrue(channelHandler.nackCalled);
+        assertFalse(channelHandler.requeue);
+    }
 }
