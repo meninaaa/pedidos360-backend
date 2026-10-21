@@ -52,12 +52,11 @@ public class OrderService {
         Order savedOrder = orderRepository.save(order);
         
         publicarEventoKafka(savedOrder);
-        enviarNotificacionRabbitMQ(savedOrder.getId(), "Su pedido #" + savedOrder.getId() + " ha sido creado.");
+        enviarNotificacionRabbitMQ(savedOrder.getId(), "Su pedido #" + savedOrder.getId() + " ha sido creado.", "email.send", "EMAIL_NOTIFICATION");
         
         return savedOrder;
     }
 
-    // ✅ CORRECCIÓN: Método para retornar los pedidos filtrados por cliente
     public List<Order> getOrdersByCustomer(String customerId) {
         return orderRepository.findByCustomerId(customerId);
     }
@@ -75,14 +74,30 @@ public class OrderService {
         order.setStatus(newStatus);
         Order updatedOrder = orderRepository.save(order);
 
+        // 1. Si el pedido es ACEPTADO: Descuenta stock y emite comando de Facturación a RabbitMQ
         if (newStatus == Order.OrderStatus.ACEPTADO) {
             coordinarDescuentoStock(updatedOrder);
+            enviarComandoRabbitMQ("invoice.gen", "GENERATE_INVOICE", updatedOrder.getId(), Map.of(
+                "orderId", updatedOrder.getId(),
+                "total", updatedOrder.getTotal(),
+                "cliente", updatedOrder.getCustomerId() != null ? updatedOrder.getCustomerId() : "Cliente"
+            ));
         }
 
+        // 2. Si el pedido pasa a EN_PREPARACION: Envía el ticket a Cocina en RabbitMQ
+        if (newStatus == Order.OrderStatus.EN_PREPARACION) {
+            enviarComandoRabbitMQ("kitchen.ticket", "PRINT_KITCHEN_TICKET", updatedOrder.getId(), Map.of(
+                "orderId", updatedOrder.getId(),
+                "productId", updatedOrder.getProductId() != null ? updatedOrder.getProductId() : 0L
+            ));
+        }
+
+        // Publicar siempre en Kafka para trazabilidad y auditoría
         publicarEventoKafka(updatedOrder);
 
-        if (newStatus == Order.OrderStatus.ACEPTADO || newStatus == Order.OrderStatus.DESPACHADO) {
-            enviarNotificacionRabbitMQ(updatedOrder.getId(), "El estado de su pedido #" + updatedOrder.getId() + " cambió a: " + newStatus);
+        // Enviar notificación por correo según el cambio de estado
+        if (newStatus == Order.OrderStatus.ACEPTADO || newStatus == Order.OrderStatus.DESPACHADO || newStatus == Order.OrderStatus.EN_PREPARACION) {
+            enviarNotificacionRabbitMQ(updatedOrder.getId(), "El estado de su pedido #" + updatedOrder.getId() + " cambió a: " + newStatus, "email.send", "EMAIL_NOTIFICATION");
         }
 
         return updatedOrder;
@@ -102,8 +117,6 @@ public class OrderService {
                 
                 if (attributes != null) {
                     HttpServletRequest request = attributes.getRequest();
-                    
-                    System.out.println("🔍 [DEBUG] Buscando el token JWT en las cabeceras de la petición...");
                     java.util.Enumeration<String> headerNames = request.getHeaderNames();
                     boolean hasAuth = false;
                     
@@ -112,23 +125,19 @@ public class OrderService {
                         if (headerName.toLowerCase().contains("authorization")) {
                             hasAuth = true;
                             String authHeader = request.getHeader(headerName);
-                            System.out.println("🔑 [DEBUG] ¡Token JWT encontrado! Pasándolo al Catálogo...");
                             headers.set(HttpHeaders.AUTHORIZATION, authHeader);
                             break;
                         }
                     }
                     
                     if (!hasAuth) {
-                        System.err.println("⚠ [FATAL] El microservicio ms-orders NO recibió el token. Tu BFF (o API Gateway) está borrando la cabecera 'Authorization' al enrutar.");
+                        System.err.println("⚠ [FATAL] El microservicio ms-orders NO recibió el token.");
                     }
                 }
 
                 HttpEntity<Void> entity = new HttpEntity<>(headers);
                 restTemplate.exchange(url, HttpMethod.PUT, entity, Void.class);
-                
                 System.out.println("✅ [STOCK] Éxito: Se descontó 1 unidad del producto ID " + productId);
-            } else {
-                System.err.println("⚠ [STOCK] El pedido no tiene un producto asociado.");
             }
         } catch (Exception e) {
             System.err.println("❌ [STOCK] Error al coordinar stock con el catálogo: " + e.getMessage());
@@ -146,9 +155,9 @@ public class OrderService {
         }
     }
 
-    private void enviarNotificacionRabbitMQ(Long orderId, String mensaje) {
+    private void enviarNotificacionRabbitMQ(Long orderId, String mensaje, String routingKey, String type) {
         Map<String, Object> envelope = new HashMap<>();
-        envelope.put("type", "EMAIL_NOTIFICATION");
+        envelope.put("type", type);
         envelope.put("eventId", UUID.randomUUID().toString());
         envelope.put("timestamp", LocalDateTime.now().toString());
         envelope.put("traceId", UUID.randomUUID().toString()); 
@@ -158,6 +167,20 @@ public class OrderService {
         payload.put("mensaje", mensaje);
         envelope.put("payload", payload);
 
-        rabbitTemplate.convertAndSend("cmd.direct", "email.send", envelope);
+        rabbitTemplate.convertAndSend("cmd.direct", routingKey, envelope);
+        System.out.println("🐇 [RABBITMQ] Mensaje enviado a '" + routingKey + "' para la orden #" + orderId);
+    }
+
+    private void enviarComandoRabbitMQ(String routingKey, String type, Long orderId, Object payloadData) {
+        Map<String, Object> envelope = new HashMap<>();
+        envelope.put("type", type);
+        envelope.put("eventId", UUID.randomUUID().toString());
+        envelope.put("timestamp", LocalDateTime.now().toString());
+        envelope.put("traceId", UUID.randomUUID().toString()); 
+        envelope.put("correlationId", orderId.toString());
+        envelope.put("payload", payloadData);
+
+        rabbitTemplate.convertAndSend("cmd.direct", routingKey, envelope);
+        System.out.println("🐇 [RABBITMQ] Comando de negocio enviado a '" + routingKey + "' para la orden #" + orderId);
     }
 }

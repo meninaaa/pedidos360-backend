@@ -74,4 +74,52 @@ public class NotificationListener {
             channel.basicNack(deliveryTag, false, false);
         }
     }
+
+    // 4. Consumidor de DLQ para Email (Auditoría de Errores)
+    @RabbitListener(queues = "q.cmd.email.dlq")
+    public void processEmailDlq(EventEnvelope<?> envelope, Channel channel, Message message) throws IOException {
+        long deliveryTag = message.getMessageProperties().getDeliveryTag();
+        try {
+            System.err.println("🚨 [DLQ-EMAIL] Mensaje irrecuperable detectado en la cola de correo.");
+            if (envelope != null) {
+                System.err.println("Trace ID: " + envelope.getTraceId());
+                System.err.println("Payload fallido: " + envelope.getPayload());
+            }
+            channel.basicAck(deliveryTag, false);
+        } catch (Exception e) {
+            channel.basicNack(deliveryTag, false, false);
+        }
+    }
+
+    // 5. Consumidor de DLQ para Cocina
+    @RabbitListener(queues = "q.cmd.kitchen.dlq")
+    public void processKitchenDlq(EventEnvelope<?> envelope, Channel channel, Message message) throws IOException {
+        long deliveryTag = message.getMessageProperties().getDeliveryTag();
+        try {
+            System.err.println("🚨 [DLQ-COCINA] Mensaje irrecuperable detectado en la comanda de cocina.");
+            if (envelope != null) {
+                System.err.println("Trace ID: " + envelope.getTraceId());
+                System.err.println("Payload fallido: " + envelope.getPayload());
+            }
+            channel.basicAck(deliveryTag, false);
+        } catch (Exception e) {
+            channel.basicNack(deliveryTag, false, false);
+        }
+    }
+
+    // 6. Consumidor de DLQ para Facturación
+    @RabbitListener(queues = "q.cmd.invoice.dlq")
+    public void processInvoiceDlq(EventEnvelope<?> envelope, Channel channel, Message message) throws IOException {
+        long deliveryTag = message.getMessageProperties().getDeliveryTag();
+        try {
+            System.err.println("🚨 [DLQ-FACTURACIÓN] Mensaje irrecuperable detectado en la boleta/factura.");
+            if (envelope != null) {
+                System.err.println("Trace ID: " + envelope.getTraceId());
+                System.err.println("Payload fallido: " + envelope.getPayload());
+            }
+            channel.basicAck(deliveryTag, false);
+        } catch (Exception e) {
+            channel.basicNack(deliveryTag, false, false);
+        }
+    }
 }
