@@ -96,10 +96,22 @@ graph TB
         T2["audit.timeline"] --> AUD["ms-audit (audit-group)"]
     end
     subgraph RabbitMQ["RabbitMQ (clúster rabbit1 + rabbit2)"]
-        EX["cmd.direct"] -->|email.send| Q1["q.cmd.email"]
+        EXD["cmd.direct"] -->|email.send| Q1["q.cmd.email"]
+        EXD -->|kitchen.ticket| Q2["q.cmd.kitchen"]
+        EXD -->|invoice.gen| Q3["q.cmd.invoice"]
+        EXT["cmd.topic"] -->|"email.*"| Q1
+        EXT -->|"kitchen.#"| Q2
+        EXT -->|"invoice.*"| Q3
         Q1 --> NOT["ms-notify"]
-        Q1 -.fallo.-> DLQ1["q.cmd.email.dlq"]
-        ADM["ms-rabbit_admin"] -.administra.-> EX
+        Q2 --> NOT
+        Q3 --> NOT
+        Q1 -.NACK / TTL / límite.-> DLX["cmd.dead.dlx"]
+        Q2 -.-> DLX
+        Q3 -.-> DLX
+        DLX --> D1["q.cmd.email.dlq"]
+        DLX --> D2["q.cmd.kitchen.dlq"]
+        DLX --> D3["q.cmd.invoice.dlq"]
+        ADM["ms-rabbit_admin"] -.administra.-> EXD
     end
 ```
 
@@ -112,7 +124,7 @@ graph TB
 5. Al cambiar de estado vía `PUT /{id}/status`, `OrderController.cambiarEstado(...)` valida la transición (no se puede `DESPACHADO` sin pasar antes por `ACEPTADO`/`EN_PREPARACION`) y delega en `OrderService.updateOrderStatus(...)`.
 6. Si el nuevo estado es `ACEPTADO`, `coordinarDescuentoStock(...)` llama de forma síncrona a `ms-pedidos360-catalog` (`PUT /api/catalog/products/{id}/reduce-stock`), propagando el JWT original extraído del `HttpServletRequest`.
 7. Cada cambio de estado dispara `publicarEventoKafka(...)`, que publica el pedido serializado en **dos** tópicos: `orders.events` y `audit.timeline`.
-8. `ms-pedidos360-report` y `ms-pedidos360-audit` consumen `orders.events` de forma independiente, cada uno con su propio `group-id` (`report-group`, `audit-group`), por lo que ambos reciben la copia completa del evento sin competir entre sí.
+8. `ms-pedidos360-report` consume `orders.events` y `ms-pedidos360-audit` consume `audit.timeline`, cada uno con su propio `group-id` (`report-group`, `audit-group`). Ambos reintentan 3 veces ante un fallo y, si persiste, el mensaje pasa al tópico `.DLT` correspondiente.
 
 Las transiciones de estado válidas son: `CREADO → ACEPTADO → EN_PREPARACION → DESPACHADO → ENTREGADO / CANCELADO`.
 
@@ -140,8 +152,8 @@ Se invoca desde `createOrder(...)` (al crear un pedido) y desde `updateOrderStat
 
 ### Consumo
 
-- **`ms-pedidos360-audit`** — `AuditKafkaConsumer.consumeOrderEvent(...)` escucha `orders.events` con `group-id: audit-group`, construye un `AuditLog` con `eventType = "ORDER_EVENT"` y el payload crudo, y lo persiste vía `AuditLogRepository`.
-- **`ms-pedidos360-report`** — `ReportMetricsService.consumeOrderEvent(...)` escucha el mismo tópico con `group-id: report-group`. Persiste cada evento como `OrderEventLog` en `report_logs` y actualiza en memoria los contadores agregados mediante `aplicarEvento(...)`:
+- **`ms-pedidos360-audit`** — `AuditConsumerService.consumeEvent(...)` escucha `audit.timeline` con `group-id: audit-group`, construye un `AuditLog` con `eventType = "ORDER_EVENT"`, actor `SYSTEM` y el payload (recortado a 3.900 caracteres por el límite de la columna en Oracle), y lo persiste vía `AuditLogRepository`. Usa `@RetryableTopic` con 3 intentos y sufijo `.DLT` para los mensajes que no se pueden procesar.
+- **`ms-pedidos360-report`** — `ReportMetricsService.consumeOrderEvent(...)` escucha `orders.events` con `group-id: report-group` (también con `@RetryableTopic`, 3 intentos y `.DLT`). Persiste cada evento como `OrderEventLog` en `report_logs` y actualiza en memoria los contadores agregados mediante `aplicarEvento(...)`:
   - `CREADO` → incrementa `pedidosActivos`.
   - `ENTREGADO` → decrementa `pedidosActivos`, suma a `ventasTotales` y calcula el lead time (`Duration` entre el timestamp de creación y el de entrega).
   - `CANCELADO` → decrementa `pedidosActivos`.
@@ -188,17 +200,31 @@ docker exec rabbit1-pedidos360 rabbitmqctl cluster_status
 
 o desde el Management UI (`http://<host>:15672`, pestaña *Overview* → *Nodes*), donde deben aparecer los dos nodos en ejecución.
 
-### Topología declarada en el caso
+### Topología declarada
 
-| Exchange | Cola principal | Routing key | DLQ |
+La topología se declara en una única clase `@Configuration` (`RabbitMQConfig`, en `ms-pedidos360-notify`), separada de la lógica de negocio, con beans `Exchange`, `Queue` y `Binding`.
+
+**Exchanges**
+
+| Exchange | Tipo | Uso |
+|---|---|---|
+| `cmd.direct` | direct | Ruteo exacto por routing key. |
+| `cmd.topic` | topic | Ruteo por patrones (`email.*`, `kitchen.#`, `invoice.*`). |
+| `cmd.dead.dlx` | direct | Dead-letter exchange: recibe los mensajes rechazados o descartados. |
+
+**Colas y bindings**
+
+| Cola principal | Binding direct | Binding topic | DLQ |
 |---|---|---|---|
-| `cmd.direct` | `q.cmd.email` | `email.send` | `q.cmd.email.dlq` |
-| `cmd.direct` | `q.cmd.kitchen` | `kitchen.ticket` | `q.cmd.kitchen.dlq` |
-| `cmd.direct` | `q.cmd.invoice` | `invoice.gen` | `q.cmd.invoice.dlq` |
+| `q.cmd.email` | `email.send` | `email.*` | `q.cmd.email.dlq` |
+| `q.cmd.kitchen` | `kitchen.ticket` | `kitchen.#` | `q.cmd.kitchen.dlq` |
+| `q.cmd.invoice` | `invoice.gen` | `invoice.*` | `q.cmd.invoice.dlq` |
 
-### Implementación actual
+Cada cola principal declara `x-dead-letter-exchange: cmd.dead.dlx` y como `x-dead-letter-routing-key` su misma routing key, con la que `cmd.dead.dlx` la enlaza a su DLQ.
 
-El método `enviarNotificacionRabbitMQ(...)` en `OrderService.java` publica únicamente comandos de tipo `EMAIL_NOTIFICATION`, usando el exchange `cmd.direct` y la routing key `email.send`:
+### Productores y consumidores
+
+El método `enviarNotificacionRabbitMQ(...)` en `OrderService.java` publica comandos de tipo `EMAIL_NOTIFICATION` en el exchange `cmd.direct` con la routing key `email.send`:
 
 ```java
 rabbitTemplate.convertAndSend("cmd.direct", "email.send", envelope);
@@ -217,7 +243,16 @@ Se invoca al crear un pedido y en las transiciones a `ACEPTADO` y `DESPACHADO`. 
 }
 ```
 
-`ms-pedidos360-notify` consume `q.cmd.email` y ejecuta el envío.
+`ms-pedidos360-notify` agrupa sus consumidores en `NotificationListener`, con un `@RabbitListener` sobre cada cola de comandos (`q.cmd.email`, `q.cmd.kitchen` y `q.cmd.invoice`).
+
+### Confirmación y manejo de errores
+
+Cada consumidor recibe el `Channel` y el `Message` y confirma de forma explícita (ACK manual):
+
+| Situación | Comportamiento |
+|---|---|
+| Procesamiento correcto | `channel.basicAck(deliveryTag, false)`. |
+| Error al procesar | `channel.basicNack(deliveryTag, false, false)`: rechazo sin requeue, por lo que el mensaje es enrutado por el DLX (`cmd.dead.dlx`) a la DLQ de su cola. |
 
 ## Microservicio administrador de RabbitMQ (`ms-pedidos360-rabbit_admin`)
 
@@ -228,33 +263,25 @@ Servicio independiente (puerto **8086**) que administra la topología del clúst
 - Crear colas, exchanges (`direct` y `topic`) y bindings.
 - Eliminar colas y exchanges existentes.
 - Validar la entrada antes de tocar el broker: un nombre vacío o una configuración inválida se rechaza con **HTTP 400** y un mensaje claro, y no se crea ningún recurso.
-- Restringir todas las operaciones al rol `Admin` (el JWT se valida de forma independiente en este servicio, igual que en el resto).
+- Restringir todas las operaciones al rol `Admin`.
 
-### Endpoints
+### Operaciones expuestas
 
-<!-- VERIFICAR: ajustar rutas y cuerpos a los que existan realmente en el controller -->
+La API REST del administrador cuelga de la ruta base `/api/admin` (la misma que enruta el API Gateway hacia este servicio):
 
-| Método | Ruta | Rol requerido | Descripción |
-|---|---|---|---|
-| `POST` | `/api/admin/queues` | Admin | Crea una cola (con soporte para DLQ y políticas de retención). |
-| `DELETE` | `/api/admin/queues/{name}` | Admin | Elimina una cola. |
-| `POST` | `/api/admin/exchanges` | Admin | Crea un exchange `direct` o `topic`. |
-| `DELETE` | `/api/admin/exchanges/{name}` | Admin | Elimina un exchange. |
-| `POST` | `/api/admin/bindings` | Admin | Crea un binding entre exchange y cola con su routing key. |
+| Operación | Método HTTP | Rol requerido |
+|---|---|---|
+| Crear una cola | `POST` | Admin |
+| Eliminar una cola | `DELETE` | Admin |
+| Crear un exchange (`direct` o `topic`) | `POST` | Admin |
+| Eliminar un exchange | `DELETE` | Admin |
+| Crear un binding (exchange, cola y routing key) | `POST` | Admin |
 
-Un usuario autenticado sin rol `Admin` recibe **403**; una solicitud sin token o con token inválido recibe **401**. Los cambios aplicados son visibles de inmediato en el Management UI del clúster.
+Las solicitudes sin token válido o sin rol `Admin` son rechazadas, y los cambios aplicados son visibles de inmediato en el Management UI del clúster.
 
-### Estructura interna
+### Organización del código
 
-```
-ms-pedidos360-rabbit_admin/
-└── src/main/java/com/pedidos360/rabbit_admin/
-    ├── controller/   # endpoints REST y validación de entrada
-    ├── service/      # RabbitAdminService
-    └── config/       # seguridad JWT y conexión a RabbitMQ
-```
-
-<!-- VERIFICAR: ajustar la estructura de paquetes a la real -->
+El código vive en el paquete `com.pedidos360.rabbit_admin`. El controller REST recibe y valida la entrada, y la lógica de administración está en `RabbitAdminService`, que declara y elimina los recursos en el broker.
 
 ### Métricas de monitoreo (Management UI)
 
@@ -424,7 +451,7 @@ URLs útiles:
 
 ## Observaciones del estado actual
 
-- La topología de RabbitMQ definida en el caso contempla tres flujos de comando (`email`, `kitchen`, `invoice`) con sus respectivas DLQ; actualmente solo el flujo de **email** tiene productor y consumidor activos en el código. `kitchen` e `invoice` están documentados en el diseño original pero no implementados aún.
+- `ms-pedidos360-notify` consume las tres colas de comandos (`email`, `kitchen`, `invoice`), pero `ms-pedidos360-orders` publica por ahora solo comandos de email; los flujos de `kitchen` e `invoice` aún no tienen productor.
 - `ms-pedidos360-orders` publica a `audit.timeline` directamente desde el mismo método que publica a `orders.events`, en vez de que `audit` derive ese tópico a partir de `orders.events`. Funcionalmente es equivalente para el alcance actual, pero difiere del diagrama original del caso, que mostraba a `audit` y `report` consumiendo ambos del mismo tópico único.
 - El cálculo de lead time en `report-service` usa los timestamps reales de los eventos recibidos; en datos de prueba generados sin demora entre transiciones de estado, el resultado puede mostrarse como `0.0` horas — es un artefacto de los datos sintéticos, no un error de cálculo.
 - La identificación del "dueño" de un pedido para el endpoint `/orders/customer` se hace comparando el claim `name`/email del JWT contra el campo `customerId` (texto libre), no contra un `userId` estable de Azure AD. Es suficiente para el alcance del caso, pero no es robusto ante usuarios con el mismo nombre.
