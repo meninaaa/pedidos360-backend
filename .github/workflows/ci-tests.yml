@@ -107,43 +107,60 @@ jobs:
       - name: Checkout del código
         uses: actions/checkout@v4
 
-      - name: Configurar Java 17
+      - name: Verificar que el módulo existe
+        env:
+          MODULO: ${{ matrix.modulo }}
+        run: |
+          if [ ! -d "$MODULO" ]; then
+            echo "::error title=Módulo no encontrado::No existe la carpeta '$MODULO'. Carpetas en la raíz:"
+            ls -1
+            exit 1
+          fi
+
+      - name: Detectar versión de Java del módulo
+        id: java
+        env:
+          MODULO: ${{ matrix.modulo }}
+        run: |
+          VERSION=$(grep -oE '<(java\.version|maven\.compiler\.release|maven\.compiler\.source)>[0-9]+' "$MODULO/pom.xml" | head -n 1 | grep -oE '[0-9]+$' || true)
+          VERSION="${VERSION:-21}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Java detectado para $MODULO: $VERSION"
+
+      - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: ${{ steps.java.outputs.version }}
           cache: maven
 
       - name: "Ejecutar prueba: ${{ matrix.test }}"
         env:
           PRUEBA: ${{ matrix.test }}
-          MODULO_SUGERIDO: ${{ matrix.modulo }}
+          MODULO: ${{ matrix.modulo }}
         run: |
-          CLASE="${PRUEBA%%#*}"
-
-          # Buscar en la carpeta del módulo o buscar dinámicamente si no coincide exactamente el nombre
-          DIR=""
-          if [ -d "$MODULO_SUGERIDO" ]; then
-            DIR="$MODULO_SUGERIDO"
-          elif [ -d "ms-pedidos360-rabbit-admin" ]; then
-            DIR="ms-pedidos360-rabbit-admin"
+          cd "$MODULO"
+          if [ -f mvnw ]; then
+            chmod +x mvnw
+            MVN=./mvnw
           else
-            ARCH=$(find . -path '*/src/test/*' -name "${CLASE}.java" | head -n 1)
-            if [ -n "$ARCH" ]; then
-              DIR=$(echo "$ARCH" | cut -d/ -f2)
-            fi
+            echo "::warning title=Sin Maven Wrapper::$MODULO no tiene mvnw commiteado, se usa mvn del runner"
+            MVN=mvn
           fi
+          $MVN -B -ntp test -Dtest="$PRUEBA"
 
-          if [ -z "$DIR" ] \vert{}\vert{} [ ! -d "$DIR" ]; then
-            echo "::error title=Módulo no encontrado::No se encontró el módulo para ${CLASE}"
-            exit 1
-          fi
-
-          echo "::group::Ejecutando en $DIR ->$PRUEBA"
-          cd "$DIR"
-          chmod +x mvnw
-          ./mvnw -B -ntp test -Dtest="$PRUEBA" -DfailIfNoTests=false
-          echo "::endgroup::"
+      - name: Mostrar detalle de los reportes si falla
+        if: failure()
+        env:
+          MODULO: ${{ matrix.modulo }}
+        run: |
+          for f in "$MODULO"/target/surefire-reports/*.txt; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+          exit 0
 
       - name: Registrar resultado en el resumen
         if: always()
