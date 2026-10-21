@@ -1,0 +1,166 @@
+name: Pedidos360 - Pruebas solicitadas en la pauta
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pauta:
+    name: ${{ matrix.prueba }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - prueba: "01. Sin token"
+            resultado: "La solicitud protegida es rechazada."
+            test: "SecurityTest#cuandoSinToken_entoncesRechazado"
+
+          - prueba: "02. Token inválido o expirado"
+            resultado: "La solicitud es rechazada."
+            test: "SecurityTest#cuandoTokenInvalidoOExpirado_entoncesRechazado"
+
+          - prueba: "03. Token válido con rol autorizado"
+            resultado: "La solicitud es procesada correctamente."
+            test: "SecurityTest#cuandoAdministradorAutenticado_entoncesProcesado"
+
+          - prueba: "04. Token válido sin permiso suficiente (usuario no Admin)"
+            resultado: "La solicitud es rechazada por autorización."
+            test: "SecurityTest#cuandoClienteIntentaAccesoAdmin_entoncesRechazadoPorPermisos"
+
+          - prueba: "05. Regla de negocio inválida"
+            resultado: "La operación no se ejecuta y no se publica ningún mensaje."
+            test: "OrderServiceTest#cuandoTransicionEstadoInvalida_entoncesLanzaIllegalStateException"
+
+          - prueba: "06. Regla de negocio válida"
+            resultado: "La operación se completa, se publica el mensaje y se devuelve el JSON esperado."
+            test: "OrderServiceTest#cuandoCrearOrdenValida_entoncesProcesaYGuarda"
+
+          - prueba: "08a. Publicación y consumo normal (cola de email)"
+            resultado: "El mensaje es consumido y confirmado con ACK."
+            test: "NotifyResilienceTest#cuandoConsumoEmailExitoso_entoncesConfirmaConAck"
+
+          - prueba: "08b. Publicación y consumo normal (cola de cocina)"
+            resultado: "El mensaje es consumido y confirmado con ACK."
+            test: "NotifyResilienceTest#cuandoConsumoKitchenExitoso_entoncesConfirmaConAck"
+
+          - prueba: "08c. Publicación y consumo normal (cola de facturación)"
+            resultado: "El mensaje es consumido y confirmado con ACK."
+            test: "NotifyResilienceTest#cuandoConsumoInvoiceExitoso_entoncesConfirmaConAck"
+
+          - prueba: "09a. Mensaje con error no recuperable (cola de email)"
+            resultado: "El consumidor envía NACK sin requeue y el mensaje llega a la DLQ."
+            test: "NotifyResilienceTest#cuandoErrorProcesamientoEmail_entoncesEnviaNackSinRequeueADlq"
+
+          - prueba: "09b. Mensaje con error no recuperable (cola de cocina)"
+            resultado: "El consumidor envía NACK sin requeue y el mensaje llega a la DLQ."
+            test: "NotifyResilienceTest#cuandoErrorProcesamientoKitchen_entoncesEnviaNackSinRequeueADlq"
+
+          - prueba: "09c. Mensaje con error no recuperable (cola de facturación)"
+            resultado: "El consumidor envía NACK sin requeue y el mensaje llega a la DLQ."
+            test: "NotifyResilienceTest#cuandoErrorProcesamientoInvoice_entoncesEnviaNackSinRequeueADlq"
+
+          - prueba: "10. Error recuperable (suite completa de resiliencia)"
+            resultado: "Reintentos acotados y, si persiste el error, el mensaje termina en la DLQ."
+            test: "NotifyResilienceTest"
+
+          - prueba: "11. Administrador: crear recurso válido"
+            resultado: "La declaración del recurso se ejecuta en el broker exitosamente."
+            test: "RabbitAdminTest#cuandoCrearColaValida_entoncesCreaRecursoExitosamente"
+
+          - prueba: "12. Administrador: eliminar recurso existente"
+            resultado: "La operación de borrado se ejecuta con éxito."
+            test: "RabbitAdminTest#cuandoEliminarColaExistente_entoncesBorraRecurso"
+
+          - prueba: "13. Administrador: nombre vacío o configuración inválida"
+            resultado: "Se rechaza la solicitud con HTTP 400 y no se crea el recurso."
+            test: "RabbitAdminControllerTest#cuandoNombreColaVacio_entoncesRetornaBadRequest"
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: "Ejecutar prueba: ${{ matrix.test }}"
+        env:
+          PRUEBA: ${{ matrix.test }}
+        run: |
+          CLASE="${PRUEBA%%#*}"
+
+          mapfile -t ARCHIVOS < <(find . -path '*/src/test/*' -name "${CLASE}.java")
+          if [ "${#ARCHIVOS[@]}" -eq 0 ]; then
+            echo "::error title=Prueba no encontrada::No existe ${CLASE}.java en ningún módulo"
+            exit 1
+          fi
+
+          for archivo in "${ARCHIVOS[@]}"; do
+            modulo="$(echo "$archivo" | cut -d/ -f2)"
+            echo "::group::Módulo ${modulo} ->${PRUEBA}"
+            (
+              cd "$modulo"
+              chmod +x mvnw
+              ./mvnw -B -ntp test -Dtest="$PRUEBA"
+            )
+            echo "::endgroup::"
+          done
+
+      - name: Registrar resultado en el resumen
+        if: always()
+        env:
+          PRUEBA: ${{ matrix.prueba }}
+          ESPERADO: ${{ matrix.resultado }}
+          TEST: ${{ matrix.test }}
+          ESTADO: ${{ job.status }}
+        run: |
+          {
+            echo "### ${PRUEBA}"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Resultado esperado | ${ESPERADO} |"
+            echo "| Prueba ejecutada | \`${TEST}\` |"
+            echo "| Estado | ${ESTADO} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Subir reportes de Surefire si falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-${{ strategy.job-index }}
+          path: "**/target/surefire-reports"
+          if-no-files-found: ignore
+
+  verificacion-manual:
+    name: "Pruebas de la pauta sin automatizar (verificación manual)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Registrar pruebas pendientes de verificación manual
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Pruebas de la pauta que no se ejecutan en CI
+
+          Estas pruebas dependen estrictamente de infraestructura en tiempo de ejecución o políticas de retención de mensajes:
+
+          | # | Prueba | Cómo verificarla |
+          |---|---|---|
+          | 07 | Estado del clúster | `rabbitmqctl cluster_status` o Management UI (puerto 15672): nodos en ejecución |
+          | 14 | Política de retención | Superar el límite o la expiración definidos y comprobar descarte o paso a la DLQ |
+          EOF
+          echo "::warning title=Pruebas sin automatizar::Las pruebas 07 y 14 requieren verificación manual."
