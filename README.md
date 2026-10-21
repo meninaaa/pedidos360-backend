@@ -451,8 +451,5 @@ URLs útiles:
 
 ## Observaciones del estado actual
 
-- `ms-pedidos360-notify` consume las tres colas de comandos (`email`, `kitchen`, `invoice`), pero `ms-pedidos360-orders` publica por ahora solo comandos de email; los flujos de `kitchen` e `invoice` aún no tienen productor.
-- `ms-pedidos360-orders` publica a `audit.timeline` directamente desde el mismo método que publica a `orders.events`, en vez de que `audit` derive ese tópico a partir de `orders.events`. Funcionalmente es equivalente para el alcance actual, pero difiere del diagrama original del caso, que mostraba a `audit` y `report` consumiendo ambos del mismo tópico único.
-- El cálculo de lead time en `report-service` usa los timestamps reales de los eventos recibidos; en datos de prueba generados sin demora entre transiciones de estado, el resultado puede mostrarse como `0.0` horas — es un artefacto de los datos sintéticos, no un error de cálculo.
 - La identificación del "dueño" de un pedido para el endpoint `/orders/customer` se hace comparando el claim `name`/email del JWT contra el campo `customerId` (texto libre), no contra un `userId` estable de Azure AD. Es suficiente para el alcance del caso, pero no es robusto ante usuarios con el mismo nombre.
 - Las pruebas 07 (estado del clúster) y 14 (política de retención) no están automatizadas porque dependen de infraestructura en ejecución; se verifican manualmente en el Management UI.
