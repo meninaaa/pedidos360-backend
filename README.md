@@ -1,6 +1,6 @@
 # Pedidos360 — Backend
 
-Plataforma logística que centraliza la gestión de pedidos, catálogo de productos, notificaciones, auditoría de eventos de negocio y reportería operacional, mediante una arquitectura de microservicios Spring Boot con autenticación corporativa federada (Azure AD) y mensajería asíncrona dual (Kafka + RabbitMQ).
+Plataforma logística que centraliza la gestión de pedidos, catálogo de productos, notificaciones, auditoría de eventos de negocio y reportería operacional, mediante una arquitectura de microservicios Spring Boot con autenticación corporativa federada (Azure AD) y mensajería asíncrona dual (Kafka + RabbitMQ en clúster de dos nodos), más un microservicio administrador de la topología de RabbitMQ.
 
 Este repositorio contiene el backend completo. El frontend (Angular 18 + MSAL) vive en un repositorio separado: [`pedidos360-frontend`](https://github.com/meninaaa/pedidos360-frontend).
 
@@ -11,12 +11,13 @@ Este repositorio contiene el backend completo. El frontend (Angular 18 + MSAL) v
 | `ms-pedidos360-bff` | 8080 | Entrada HTTP para el cliente, propaga el JWT entrante y reenvía hacia los microservicios internos vía `RestTemplate`. |
 | `ms-pedidos360-orders` | 8081 | CRUD de pedidos, máquina de estados, coordinación de descuento de stock contra `catalog`, integración de pagos con Transbank Webpay Plus, productor de eventos Kafka y comandos RabbitMQ. |
 | `ms-pedidos360-catalog` | 8082 | CRUD de productos, control de stock, expone el endpoint interno de descuento usado por `orders`. |
-| `ms-pedidos360-notify` | — | Consumidor de RabbitMQ para el envío de notificaciones (sin base de datos propia). |
+| `ms-pedidos360-notify` | 8083 | Consumidor de RabbitMQ para el envío de notificaciones (sin base de datos propia). |
 | `ms-pedidos360-audit` | 8084 | Consume eventos de Kafka y los persiste como registro inmutable de auditoría en `audit_logs`. |
 | `ms-pedidos360-report` | 8085 | Consume eventos de Kafka, los persiste en `report_logs` y calcula KPIs (ventas, pedidos activos, lead time) a partir del histórico. |
-| Oracle XE | 1521 | Base de datos, una instancia por servicio que la requiere (aislamiento de dominio). |
+| `ms-pedidos360-rabbit_admin` | 8086 | **Microservicio administrador de RabbitMQ.** API REST para crear colas, exchanges y bindings y eliminar colas y exchanges del clúster, con validación de entrada. Acceso restringido al rol `Admin`. |
+| Oracle XE | 1521 (1522 en el host) | Base de datos, una instancia por servicio que la requiere (aislamiento de dominio). |
 | Kafka + Zookeeper | 9092 / 29092 interno | Event streaming de eventos de negocio. |
-| RabbitMQ | 5672 (AMQP) / 15672 (consola) | Mensajería de comandos de trabajo. |
+| RabbitMQ (`rabbit1`, `rabbit2`) | 5672 y 5673 (AMQP) / 15672 y 15673 (consola) | Mensajería de comandos de trabajo, desplegada como clúster de dos nodos. |
 
 ## Diagramas
 
@@ -30,12 +31,14 @@ graph LR
     BFF --> CAT["ms-pedidos360-catalog :8082"]
     BFF --> AUD["ms-pedidos360-audit :8084"]
     BFF --> REP["ms-pedidos360-report :8085"]
+    BFF -->|solo Admin| ADM["ms-pedidos360-rabbit_admin :8086"]
     ORD -->|PUT reduce-stock| CAT
     ORD -->|orders.events + audit.timeline| KAFKA[("Kafka")]
     KAFKA --> AUD
     KAFKA --> REP
-    ORD -->|cmd.direct / email.send| MQ[("RabbitMQ")]
+    ORD -->|cmd.direct / email.send| MQ[("Clúster RabbitMQ<br/>rabbit1 + rabbit2")]
     MQ --> NOT["ms-pedidos360-notify"]
+    ADM -->|crea / elimina colas, exchanges, bindings| MQ
     ORD -->|create / commit| TBK["Transbank Webpay Plus"]
 
     AZ["Azure AD / Entra ID"] -.->|emite JWT| FE
@@ -92,10 +95,11 @@ graph TB
         T1["orders.events"] --> REP["ms-report (report-group)"]
         T2["audit.timeline"] --> AUD["ms-audit (audit-group)"]
     end
-    subgraph RabbitMQ
+    subgraph RabbitMQ["RabbitMQ (clúster rabbit1 + rabbit2)"]
         EX["cmd.direct"] -->|email.send| Q1["q.cmd.email"]
         Q1 --> NOT["ms-notify"]
         Q1 -.fallo.-> DLQ1["q.cmd.email.dlq"]
+        ADM["ms-rabbit_admin"] -.administra.-> EX
     end
 ```
 
@@ -160,12 +164,29 @@ spring:
 ```
 
 ```bash
-docker compose up -d zookeeper-pedidos360 kafka-pedidos360
+docker compose up -d zookeeper kafka
 ```
 
 ## RabbitMQ
 
 RabbitMQ transporta comandos dirigidos a una acción concreta (por ejemplo, "enviar este email"), a diferencia de Kafka, que transporta hechos de dominio que varios consumidores pueden leer de forma independiente.
+
+### Clúster de dos nodos
+
+RabbitMQ se despliega como un clúster de dos nodos definido en `infra/apps/compose.yml`:
+
+| Nodo | Contenedor | AMQP | Management UI |
+|---|---|---|---|
+| `rabbit1` | `rabbit1-pedidos360` | 5672 | 15672 |
+| `rabbit2` | `rabbit2-pedidos360` | 5673 | 15673 |
+
+Ambos nodos comparten la misma `RABBITMQ_ERLANG_COOKIE`. `rabbit1` expone un healthcheck (`rabbitmq-diagnostics ping`) y `rabbit2` espera a que esté sano antes de ejecutar `stop_app` → `join_cluster rabbit@rabbit1` → `start_app`. Para comprobar el estado del clúster:
+
+```bash
+docker exec rabbit1-pedidos360 rabbitmqctl cluster_status
+```
+
+o desde el Management UI (`http://<host>:15672`, pestaña *Overview* → *Nodes*), donde deben aparecer los dos nodos en ejecución.
 
 ### Topología declarada en el caso
 
@@ -198,6 +219,54 @@ Se invoca al crear un pedido y en las transiciones a `ACEPTADO` y `DESPACHADO`. 
 
 `ms-pedidos360-notify` consume `q.cmd.email` y ejecuta el envío.
 
+## Microservicio administrador de RabbitMQ (`ms-pedidos360-rabbit_admin`)
+
+Servicio independiente (puerto **8086**) que administra la topología del clúster RabbitMQ sin necesidad de entrar al Management UI ni de redeployar los demás servicios. Se conecta al clúster mediante `SPRING_RABBITMQ_HOST` y delega la lógica en `RabbitAdminService`, que usa `RabbitAdmin` de Spring AMQP para declarar y eliminar recursos.
+
+### Responsabilidades
+
+- Crear colas, exchanges (`direct` y `topic`) y bindings.
+- Eliminar colas y exchanges existentes.
+- Validar la entrada antes de tocar el broker: un nombre vacío o una configuración inválida se rechaza con **HTTP 400** y un mensaje claro, y no se crea ningún recurso.
+- Restringir todas las operaciones al rol `Admin` (el JWT se valida de forma independiente en este servicio, igual que en el resto).
+
+### Endpoints
+
+<!-- VERIFICAR: ajustar rutas y cuerpos a los que existan realmente en el controller -->
+
+| Método | Ruta | Rol requerido | Descripción |
+|---|---|---|---|
+| `POST` | `/api/admin/queues` | Admin | Crea una cola (con soporte para DLQ y políticas de retención). |
+| `DELETE` | `/api/admin/queues/{name}` | Admin | Elimina una cola. |
+| `POST` | `/api/admin/exchanges` | Admin | Crea un exchange `direct` o `topic`. |
+| `DELETE` | `/api/admin/exchanges/{name}` | Admin | Elimina un exchange. |
+| `POST` | `/api/admin/bindings` | Admin | Crea un binding entre exchange y cola con su routing key. |
+
+Un usuario autenticado sin rol `Admin` recibe **403**; una solicitud sin token o con token inválido recibe **401**. Los cambios aplicados son visibles de inmediato en el Management UI del clúster.
+
+### Estructura interna
+
+```
+ms-pedidos360-rabbit_admin/
+└── src/main/java/com/pedidos360/rabbit_admin/
+    ├── controller/   # endpoints REST y validación de entrada
+    ├── service/      # RabbitAdminService
+    └── config/       # seguridad JWT y conexión a RabbitMQ
+```
+
+<!-- VERIFICAR: ajustar la estructura de paquetes a la real -->
+
+### Métricas de monitoreo (Management UI)
+
+Para operar el clúster se observan cuatro métricas en el Management UI:
+
+| Métrica | Dónde verla | Por qué importa |
+|---|---|---|
+| Colas activas | *Queues* | Confirma que la topología declarada existe. |
+| Mensajes pendientes (*Ready* / *Unacked*) | *Queues* | Un crecimiento sostenido indica consumidores lentos o caídos. |
+| Consumidores | *Queues* → detalle de cola | Una cola sin consumidores acumula mensajes. |
+| Mensajes en DLQ | `q.cmd.*.dlq` | Cada mensaje allí es un fallo no recuperable que requiere revisión. |
+
 ## Pagos — Transbank Webpay Plus
 
 `WebpayController.java` en `ms-pedidos360-orders` integra el ambiente de **integración (sandbox)** de Webpay Plus REST:
@@ -224,13 +293,60 @@ Se invoca al crear un pedido y en las transiciones a `ACEPTADO` y `DESPACHADO`. 
 | `GET` | `/api/reports/lead-time-trend` | Admin | Lead time por pedido entregado. |
 | `POST` | `/api/payments/create` | Usuario autenticado | Inicia un pago Webpay. |
 | `POST` | `/api/payments/commit` | Pública | Confirmación de pago (llamada por Transbank). |
+| `*` | `/api/admin/**` | Admin | Administración de colas, exchanges y bindings de RabbitMQ (ver sección del administrador). |
 
 ## Seguridad
 
 1. El frontend se autentica contra Azure AD vía MSAL y adjunta el JWT como `Authorization: Bearer <token>`.
-2. En despliegue cloud, AWS API Gateway (HTTP API) valida `issuer` y `audience` con un JWT Authorizer antes de enrutar.
-3. Cada microservicio vuelve a validar el token de forma independiente (`spring.security.oauth2.resourceserver.jwt.issuer-uri`), y aplica autorización por rol con `@PreAuthorize("hasAnyRole(...)")`.
+2. En despliegue cloud, AWS API Gateway (HTTP API) valida `issuer` y `audience` con un JWT Authorizer antes de enrutar, incluida la ruta `/api/admin/*`.
+3. Cada microservicio vuelve a validar el token de forma independiente (`spring.security.oauth2.resourceserver.jwt.issuer-uri`), y aplica autorización por rol con `@PreAuthorize("hasAnyRole(...)")`. La administración de RabbitMQ queda limitada a `Admin`.
 4. El claim `roles` del JWT se mapea a authorities con prefijo `ROLE_`. Los roles usados en todo el sistema son, en español: `Admin`, `Operador`, `Cliente`.
+
+## Pruebas
+
+Las pruebas mínimas obligatorias de la pauta (sección 7 de la guía de la EP2) están cubiertas con pruebas automatizadas en JUnit 5 + Mockito + Spring Security Test, a excepción de dos que dependen de infraestructura en ejecución y se verifican manualmente (ver más abajo).
+
+### Cobertura de la pauta
+
+| # | Prueba de la pauta | Resultado esperado | Módulo | Prueba automatizada |
+|---|---|---|---|---|
+| 01 | Sin token | La solicitud protegida es rechazada. | `orders` | `SecurityTest#cuandoSinToken_entoncesRechazado` |
+| 02 | Token inválido o expirado | La solicitud es rechazada. | `orders` | `SecurityTest#cuandoTokenInvalidoOExpirado_entoncesRechazado` |
+| 03 | Token válido con rol autorizado | La solicitud es procesada correctamente. | `orders` | `SecurityTest#cuandoAdministradorAutenticado_entoncesProcesado` |
+| 04 | Token válido sin permiso suficiente | La solicitud es rechazada por autorización. | `orders` | `SecurityTest#cuandoClienteIntentaAccesoAdmin_entoncesRechazadoPorPermisos` |
+| 05 | Regla de negocio inválida | La operación no se ejecuta y no se publica ningún mensaje. | `orders` | `OrderServiceTest#cuandoTransicionEstadoInvalida_entoncesLanzaIllegalStateException` |
+| 06 | Regla de negocio válida | La operación se completa, se publica el mensaje y se devuelve el JSON esperado. | `orders` | `OrderServiceTest#cuandoCrearOrdenValida_entoncesProcesaYGuarda` |
+| 08 | Publicación y consumo normal (las tres colas) | El mensaje es consumido y confirmado con ACK. | `notify` | `NotifyResilienceTest#cuandoConsumoEmailExitoso_entoncesConfirmaConAck`, `...KitchenExitoso...`, `...InvoiceExitoso...` |
+| 09 | Mensaje con error no recuperable (las tres colas) | NACK sin requeue; el mensaje llega a la DLQ. | `notify` | `NotifyResilienceTest#cuandoErrorProcesamientoEmail_entoncesEnviaNackSinRequeueADlq`, `...Kitchen...`, `...Invoice...` |
+| 10 | Error recuperable | Reintentos acotados y, si persiste, el mensaje termina en la DLQ. | `notify` | Suite completa `NotifyResilienceTest` |
+| 11 | Administrador: crear recurso válido | El recurso se declara correctamente en el broker. | `rabbit_admin` | `RabbitAdminTest#cuandoCrearColaValida_entoncesCreaRecursoExitosamente` |
+| 12 | Administrador: eliminar recurso | El recurso se elimina con éxito. | `rabbit_admin` | `RabbitAdminTest#cuandoEliminarColaExistente_entoncesBorraRecurso` |
+| 13 | Administrador: nombre vacío o configuración inválida | Se rechaza con HTTP 400 y no se crea nada. | `rabbit_admin` | `RabbitAdminTest#cuandoNombreColaVacio_entoncesLanzaExcepcionBadRequest` |
+
+### Pruebas verificadas manualmente
+
+| # | Prueba | Cómo verificarla |
+|---|---|---|
+| 07 | Estado del clúster | `rabbitmqctl cluster_status` o Management UI (puerto 15672): los dos nodos en ejecución. |
+| 14 | Política de retención | Superar el límite o la expiración definidos y comprobar que los mensajes se descartan o pasan a la DLQ. |
+
+### Ejecución
+
+Desde la raíz de cada módulo:
+
+```bash
+./mvnw test
+```
+
+o una prueba puntual:
+
+```bash
+./mvnw test -Dtest="SecurityTest#cuandoSinToken_entoncesRechazado"
+```
+
+### Integración continua
+
+El workflow de GitHub Actions `Pedidos360 - Pruebas solicitadas en la pauta` (`.github/workflows`) ejecuta cada prueba de la tabla anterior como un job independiente de la matriz, de modo que cada fila de la pauta queda como un check separado con su resultado esperado registrado en el resumen de la ejecución. Se dispara en cada `push` y `pull_request` hacia `main`, `master` y `develop`, y manualmente con `workflow_dispatch`. Si una prueba falla, se suben los reportes de Surefire como artefacto.
 
 ## Requisitos
 
@@ -253,7 +369,7 @@ spring:
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-pedidos360:29092}
   rabbitmq:
-    host: ${SPRING_RABBITMQ_HOST:rabbitmq-pedidos360}
+    host: ${SPRING_RABBITMQ_HOST:rabbit1-pedidos360}
   security:
     oauth2:
       resourceserver:
@@ -266,7 +382,7 @@ spring:
 
 ```bash
 git clone https://github.com/meninaaa/pedidos360-backend.git
-cd pedidos360-backend/infra
+cd pedidos360-backend/infra/apps
 docker compose up -d --build
 ```
 
@@ -274,13 +390,15 @@ Swagger de cada servicio disponible en `http://localhost:<puerto>/swagger-ui.htm
 
 URLs útiles:
 - BFF: `http://localhost:8080`
-- RabbitMQ Management: `http://localhost:15672` (guest / guest)
+- Administrador de RabbitMQ: `http://localhost:8086`
+- RabbitMQ Management (nodo 1): `http://localhost:15672` (guest / guest)
+- RabbitMQ Management (nodo 2): `http://localhost:15673` (guest / guest)
 
 ## Despliegue en AWS
 
-- **EC2** (recomendado `t3.medium`, con **Elastic IP** asociada para evitar que la integración del API Gateway se rompa en cada reinicio) corriendo el stack completo vía Docker Compose.
+- **EC2** (recomendado `t3.medium` o superior, con **Elastic IP** asociada para evitar que la integración del API Gateway se rompa en cada reinicio) corriendo el stack completo, incluido el clúster RabbitMQ de dos nodos, vía Docker Compose.
 - **AWS API Gateway (HTTP API)** con:
-  - Ruta proxy `ANY /{proxy+}` hacia la EC2, protegida por un **JWT Authorizer** (`issuer` y `audience` de Azure AD).
+  - Ruta proxy `ANY /{proxy+}` hacia la EC2, protegida por un **JWT Authorizer** (`issuer` y `audience` de Azure AD). Esto incluye las rutas `/api/admin/*` del administrador de RabbitMQ.
   - Ruta específica `POST /api/bff/payments/commit`, **sin Authorizer**, para el retorno de Transbank.
   - **CORS** configurado nativamente en la API (no como ruta `OPTIONS` manual), ya que el preflight del navegador nunca lleva JWT y el Authorizer lo rechazaría.
 
@@ -288,14 +406,20 @@ URLs útiles:
 
 ```
 .
+├── .github/
+│   └── workflows/            # pruebas de la pauta (matriz)
 ├── infra/
-│   └── docker-compose.yml
+│   ├── apps/
+│   │   └── compose.yml
+│   ├── kafka/
+│   └── mq/
 ├── ms-pedidos360-bff/
 ├── ms-pedidos360-orders/
 ├── ms-pedidos360-catalog/
 ├── ms-pedidos360-notify/
 ├── ms-pedidos360-audit/
-└── ms-pedidos360-report/
+├── ms-pedidos360-report/
+└── ms-pedidos360-rabbit_admin/
 ```
 
 ## Observaciones del estado actual
@@ -304,3 +428,4 @@ URLs útiles:
 - `ms-pedidos360-orders` publica a `audit.timeline` directamente desde el mismo método que publica a `orders.events`, en vez de que `audit` derive ese tópico a partir de `orders.events`. Funcionalmente es equivalente para el alcance actual, pero difiere del diagrama original del caso, que mostraba a `audit` y `report` consumiendo ambos del mismo tópico único.
 - El cálculo de lead time en `report-service` usa los timestamps reales de los eventos recibidos; en datos de prueba generados sin demora entre transiciones de estado, el resultado puede mostrarse como `0.0` horas — es un artefacto de los datos sintéticos, no un error de cálculo.
 - La identificación del "dueño" de un pedido para el endpoint `/orders/customer` se hace comparando el claim `name`/email del JWT contra el campo `customerId` (texto libre), no contra un `userId` estable de Azure AD. Es suficiente para el alcance del caso, pero no es robusto ante usuarios con el mismo nombre.
+- Las pruebas 07 (estado del clúster) y 14 (política de retención) no están automatizadas porque dependen de infraestructura en ejecución; se verifican manualmente en el Management UI.
