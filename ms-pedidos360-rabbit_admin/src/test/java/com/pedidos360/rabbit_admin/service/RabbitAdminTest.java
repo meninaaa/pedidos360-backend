@@ -1,4 +1,4 @@
-package com.pedidos360.rabbit_admin;
+package com.pedidos360.rabbit_admin.service;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
