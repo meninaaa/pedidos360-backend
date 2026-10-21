@@ -1,11 +1,11 @@
-package com.pedidos360.report_service;
+package com.pedidos360.rabbit_admin;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class ReportServiceApplication {
+public class RabbitAdminApplication {
     public static void main(String[] args) {
-        SpringApplication.run(ReportServiceApplication.class, args);
+        SpringApplication.run(RabbitAdminApplication.class, args);
     }
 }
