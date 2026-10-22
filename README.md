@@ -102,7 +102,7 @@ graph TB
         EXT["cmd.topic"] -->|"email.*"| Q1
         EXT -->|"kitchen.#"| Q2
         EXT -->|"invoice.*"| Q3
-        Q1 --> NOT["ms-notify"]
+        Q1 --> NOT["ms-notify y ms-orders"]
         Q2 --> NOT
         Q3 --> NOT
         Q1 -.NACK / TTL / límite.-> DLX["cmd.dead.dlx"]
