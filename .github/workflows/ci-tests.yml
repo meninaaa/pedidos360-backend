@@ -185,14 +185,7 @@ jobs:
           MODULO: ${{ matrix.modulo }}
         run: |
           cd "$MODULO"
-          if [ -f mvnw ]; then
-            chmod +x mvnw
-            MVN=./mvnw
-          else
-            echo "::warning title=Sin Maven Wrapper::$MODULO no tiene mvnw commiteado, se usa mvn del runner"
-            MVN=mvn
-          fi
-          $MVN -B -ntp test -Dtest="$PRUEBA"
+          mvn -B -ntp test -Dtest="$PRUEBA"
 
       - name: Mostrar detalle de los reportes si falla
         if: failure()
