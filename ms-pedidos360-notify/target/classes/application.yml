@@ -5,15 +5,14 @@ spring:
   application:
     name: ms-pedidos360-notify
 
-  # Conexión a RabbitMQ
   rabbitmq:
-    host: localhost
+    host: ${SPRING_RABBITMQ_HOST:rabbit1-pedidos360}
     port: 5672
     username: guest
     password: guest
     listener:
       simple:
-        acknowledge-mode: manual # Exigencia del caso: ACK/NACK explícitos
+        acknowledge-mode: manual
         retry:
           enabled: true
           initial-interval: 2000

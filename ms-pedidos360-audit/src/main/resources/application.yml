@@ -4,7 +4,7 @@ server:
 spring:
   application:
     name: ms-audit
-  
+
   main:
     allow-bean-definition-overriding: true
 
@@ -17,7 +17,7 @@ spring:
       connection-timeout: 120000
       maximum-pool-size: 5
       initialization-fail-timeout: 0
-  
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -25,14 +25,20 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.OracleDialect
-  
+
   kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-pedidos360:29092}
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-1:29092,kafka-2:29093,kafka-3:29094}
     consumer:
       group-id: audit-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.pedidos360.audit_service.dto.OrderEventDTO
+        spring.json.trusted.packages: "*"
 
   security:
     oauth2:

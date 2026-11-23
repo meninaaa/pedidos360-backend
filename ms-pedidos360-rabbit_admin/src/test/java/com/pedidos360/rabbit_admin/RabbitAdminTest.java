@@ -1,5 +1,6 @@
-package com.pedidos360.rabbit_admin.service;
+package com.pedidos360.rabbit_admin;
 
+import com.pedidos360.rabbit_admin.service.RabbitAdminService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

@@ -1,13 +1,15 @@
 package com.pedidos360.bff_service.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Base64;
@@ -35,7 +37,9 @@ public class BffController {
     @Value("${REPORT_SERVICE_URL:http://report-pedidos360:8085}")
     private String reportUrl;
 
-    @Autowired
+    @Value("${KAFKA_ADMIN_SERVICE_URL:http://kafka-admin-pedidos360:8087}")
+    private String kafkaAdminUrl;
+
     public BffController(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
@@ -45,6 +49,9 @@ public class BffController {
         if (authHeader != null) {
             headers.set("Authorization", authHeader);
         }
+        if (body != null) {
+            headers.setContentType(MediaType.APPLICATION_JSON);
+        }
         return new HttpEntity<>(body, headers);
     }
 
@@ -53,8 +60,9 @@ public class BffController {
     // ==========================================
 
     @GetMapping("/orders")
+    @SuppressWarnings("unchecked")
     public ResponseEntity<?> getOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
-        String targetEndpoint = "/api/orders/me"; 
+        String targetEndpoint = "/api/orders/me";
 
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             try {
@@ -63,13 +71,12 @@ public class BffController {
                 if (chunks.length > 1) {
                     String payload = new String(Base64.getUrlDecoder().decode(chunks[1]));
                     Map<String, Object> claims = objectMapper.readValue(payload, Map.class);
-                    
-                    // CORREGIDO: Uso correcto de paréntesis en claims.get("roles")
+
                     String rolesStr = claims.get("roles") != null ? claims.get("roles").toString() : "";
                     if (rolesStr.contains("Admin") || rolesStr.contains("Administrador")) {
-                        targetEndpoint = "/api/orders"; 
+                        targetEndpoint = "/api/orders";
                     } else if (rolesStr.contains("Operador") || rolesStr.contains("Operador de Logística")) {
-                        targetEndpoint = "/api/orders/pending"; 
+                        targetEndpoint = "/api/orders/pending";
                     }
                 }
             } catch (Exception e) {
@@ -88,6 +95,7 @@ public class BffController {
     }
 
     @GetMapping("/orders/me")
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public ResponseEntity<?> getMyOrders(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         try {
             String userEmail = "";
@@ -97,7 +105,7 @@ public class BffController {
                 if (chunks.length > 1) {
                     String payload = new String(Base64.getUrlDecoder().decode(chunks[1]));
                     Map<String, Object> claims = objectMapper.readValue(payload, Map.class);
-                    
+
                     if (claims.containsKey("preferred_username")) {
                         userEmail = claims.get("preferred_username").toString();
                     } else if (claims.containsKey("email")) {
@@ -112,15 +120,15 @@ public class BffController {
 
             HttpEntity<Object> entity = createHttpEntity(null, authHeader);
             ResponseEntity<List> response = restTemplate.exchange(ordersUrl + "/api/orders", HttpMethod.GET, entity, List.class);
-            
-            List<Map<String, Object>> allOrders = (List<Map<String, Object>>) response.getBody();
+
+            List<java.util.Map<String, Object>> allOrders = (List<java.util.Map<String, Object>>) response.getBody();
             if (allOrders == null) {
                 return ResponseEntity.ok(Collections.emptyList());
             }
 
             if (userEmail != null && !userEmail.isEmpty()) {
                 String finalEmail = userEmail.trim();
-                List<Map<String, Object>> filteredOrders = allOrders.stream()
+                List<java.util.Map<String, Object>> filteredOrders = allOrders.stream()
                     .filter(order -> {
                         Object custId = order.get("customerId");
                         if (custId == null) return false;
@@ -152,9 +160,6 @@ public class BffController {
         return restTemplate.exchange(url, HttpMethod.PUT, entity, Object.class);
     }
 
-    // ==========================================
-    // Filtrar pedidos por cliente
-    // ==========================================
     @GetMapping("/orders/customer")
     public ResponseEntity<?> getOrdersByCustomer(@RequestParam String email, @RequestHeader(value = "Authorization", required = false) String authHeader) {
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
@@ -165,6 +170,7 @@ public class BffController {
     // ==========================================
     // PUENTES PARA WEBPAY (TRANSBANK)
     // ==========================================
+
     @PostMapping("/payments/create")
     public ResponseEntity<?> createPayment(@RequestParam double amount, @RequestParam String orderId, @RequestHeader(value = "Authorization", required = false) String authHeader) {
         HttpEntity<Object> entity = createHttpEntity(null, authHeader);
@@ -173,6 +179,7 @@ public class BffController {
     }
 
     @GetMapping("/payments/commit")
+    @SuppressWarnings("unchecked")
     public void commitPayment(
             @RequestParam(value = "token_ws", required = false) String tokenWs,
             @RequestParam(value = "TBK_TOKEN", required = false) String tbkToken,
@@ -183,7 +190,6 @@ public class BffController {
         if (tbkToken != null) url += "TBK_TOKEN=" + tbkToken;
 
         try {
-            // Hacemos un GET hacia el microservicio de órdenes
             Map<String, String> result = restTemplate.getForObject(url, Map.class);
 
             if (result != null && result.containsKey("url")) {
@@ -265,4 +271,31 @@ public class BffController {
         return restTemplate.exchange(reportUrl + "/api/reports/top-productos", HttpMethod.GET, entity, Object.class);
     }
 
+    // ==========================================
+    // MÓDULO DE ADMINISTRACIÓN KAFKA (KAFKA_ADMIN)
+    // ==========================================
+
+    @RequestMapping(value = "/kafka-admin/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE})
+    public ResponseEntity<?> proxyKafkaAdmin(
+            HttpServletRequest request,
+            @RequestBody(required = false) Object body,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+
+        String uri = request.getRequestURI();
+        String subPath = uri.substring(uri.indexOf("/kafka-admin"));
+        String targetUrl = kafkaAdminUrl + "/api" + subPath;
+
+        if (request.getQueryString() != null && !request.getQueryString().isEmpty()) {
+            targetUrl += "?" + request.getQueryString();
+        }
+
+        HttpEntity<Object> entity = createHttpEntity(body, authHeader);
+        HttpMethod method = HttpMethod.valueOf(request.getMethod());
+
+        try {
+            return restTemplate.exchange(targetUrl, method, entity, Object.class);
+        } catch (HttpStatusCodeException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(ex.getResponseBodyAsString());
+        }
+    }
 }

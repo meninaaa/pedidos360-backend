@@ -37,10 +37,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                
-                // ✅ NUEVA REGLA: Dejamos pasar libremente a Transbank hacia el BFF
-                .requestMatchers("/api/bff/payments/**").permitAll() 
-                
+                .requestMatchers("/api/bff/payments/**").permitAll()
+                .requestMatchers("/api/bff/kafka-admin/**").hasAnyRole("Administrador", "Admin")
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )
@@ -57,7 +55,6 @@ public class SecurityConfig {
     public JwtDecoder jwtDecoder() {
         NimbusJwtDecoder jwtDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
 
-        // Validador robusto: getAudience() procesa internamente tanto Strings como Listas (ArrayList)
         OAuth2TokenValidator<Jwt> audienceValidator = new OAuth2TokenValidator<Jwt>() {
             @Override
             public org.springframework.security.oauth2.core.OAuth2TokenValidatorResult validate(Jwt jwt) {
@@ -85,7 +82,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(Arrays.asList("http://localhost:4200"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
-        
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;

@@ -64,7 +64,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - pedidos360-net
 
@@ -88,7 +88,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - pedidos360-net
 
@@ -112,7 +112,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
       KAFKA_DEFAULT_REPLICATION_FACTOR: 3
       KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - pedidos360-net
 
@@ -143,11 +143,11 @@ services:
     command: |
       echo 'Esperando a que los 3 brokers Kafka inicien...'
       sleep 20
-      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic orders.events --partitions 3 --replication-factor 3 --config min.insync.replicas=2
-      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic audit.timeline --partitions 3 --replication-factor 3 --config min.insync.replicas=2
-      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic report.DLT --partitions 3 --replication-factor 3 --config min.insync.replicas=2
-      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic audit.DLT --partitions 3 --replication-factor 3 --config min.insync.replicas=2
-      echo 'Tópicos creados exitosamente con 3 particiones y 3 réplicas'
+      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic orders.events --partitions 3 --replication-factor 3 --config min.insync.replicas=2 --config retention.ms=604800000 --config cleanup.policy=delete
+      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic audit.timeline --partitions 3 --replication-factor 3 --config min.insync.replicas=2 --config retention.ms=2592000000 --config cleanup.policy=delete
+      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic orders.events.DLT --partitions 3 --replication-factor 3 --config min.insync.replicas=2 --config retention.ms=2592000000 --config cleanup.policy=delete
+      kafka-topics --bootstrap-server kafka-1:29092 --create --if-not-exists --topic audit.timeline.DLT --partitions 3 --replication-factor 3 --config min.insync.replicas=2 --config retention.ms=2592000000 --config cleanup.policy=delete
+      echo 'Tópicos creados exitosamente con 3 particiones, 3 réplicas y políticas de retención'
     networks:
       - pedidos360-net
 

@@ -103,6 +103,51 @@ jobs:
             modulo: "ms-pedidos360-rabbit_admin"
             test: "RabbitAdminTest#cuandoNombreColaVacio_entoncesLanzaExcepcionBadRequest"
 
+          - prueba: "14. Kafka Productor: emisión en creación de pedido"
+            resultado: "Publica OrderEventDTO en los tópicos orders.events y audit.timeline."
+            modulo: "ms-pedidos360-orders"
+            test: "OrderKafkaProducerTest#cuandoCrearPedido_entoncesPublicaDtoEnAmbosTopicosKafka"
+
+          - prueba: "15. Kafka Productor: emisión en actualización de estado"
+            resultado: "Emite evento actualizado hacia Kafka al cambiar estado del pedido."
+            modulo: "ms-pedidos360-orders"
+            test: "OrderKafkaProducerTest#cuandoActualizarEstadoAEntregado_entoncesEmiteEventoConNuevoEstado"
+
+          - prueba: "16. Kafka Consumidor Auditoría: persistencia válida"
+            resultado: "Consume desde audit.timeline y guarda registro inmutable en Oracle."
+            modulo: "ms-pedidos360-audit"
+            test: "AuditEventListenerTest#cuandoEventoAuditoriaValido_entoncesPersisteEnBaseDeDatos"
+
+          - prueba: "17. Kafka Consumidor Auditoría: payload inválido a DLT"
+            resultado: "Rechaza mensaje corrupto para activar reintentos y enrutamiento a DLT."
+            modulo: "ms-pedidos360-audit"
+            test: "AuditEventListenerTest#cuandoEventoAuditoriaInvalido_entoncesLanzaExcepcionParaReintentoYDlt"
+
+          - prueba: "18. Kafka Consumidor Reportería: actualización de KPIs y Top Productos"
+            resultado: "Calcula métricas de ventas, pedidos activos y lead time en tiempo real."
+            modulo: "ms-pedidos360-report"
+            test: "ReportEventListenerTest#cuandoFlujoPedidoCompletado_entoncesActualizaMetricasYTopProductos"
+
+          - prueba: "19. Kafka Consumidor Reportería: payload inválido a DLT"
+            resultado: "Rechaza mensaje inválido para activar reintentos y enrutamiento a DLT."
+            modulo: "ms-pedidos360-report"
+            test: "ReportEventListenerTest#cuandoEventoReporteInvalido_entoncesLanzaExcepcionParaReintentoYDlt"
+
+          - prueba: "20. Kafka Admin: solicitud sin token"
+            resultado: "Retorna HTTP 401 Unauthorized."
+            modulo: "ms-pedidos360-kafka_admin"
+            test: "KafkaAdminSecurityTest#cuandoSinToken_entoncesRetornaUnauthorized"
+
+          - prueba: "21. Kafka Admin: solicitud con rol Cliente"
+            resultado: "Retorna HTTP 403 Forbidden."
+            modulo: "ms-pedidos360-kafka_admin"
+            test: "KafkaAdminSecurityTest#cuandoRolCliente_entoncesRetornaForbidden"
+
+          - prueba: "22. Kafka Admin: solicitud con rol Admin"
+            resultado: "Retorna HTTP 200 OK y permite gestionar tópicos."
+            modulo: "ms-pedidos360-kafka_admin"
+            test: "KafkaAdminSecurityTest#cuandoRolAdmin_entoncesPermiteListarTopicos"
+
     steps:
       - name: Checkout del código
         uses: actions/checkout@v4
@@ -199,7 +244,7 @@ jobs:
 
           | # | Prueba | Cómo verificarla |
           |---|---|---|
-          | 07 | Estado del clúster | `rabbitmqctl cluster_status` o Management UI |
-          | 14 | Política de retención | Superar el límite y comprobar descarte/DLQ |
+          | 07 | Estado del clúster RabbitMQ y Kafka | `rabbitmqctl cluster_status` / Kafka-UI (`http://localhost:8090`) |
+          | 14b | Política de retención y particionado | Verificar 3 particiones, 3 réplicas y `retention.ms` en Kafka-UI |
           EOF
-          echo "::warning title=Pruebas manuales::07 y 14 se verifican manualmente."
+          echo "::warning title=Pruebas manuales::07 y 14b se verifican manualmente."

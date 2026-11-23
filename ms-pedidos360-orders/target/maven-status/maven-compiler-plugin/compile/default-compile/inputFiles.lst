@@ -1,8 +1,11 @@
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\config\AppConfig.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\config\KafkaTopicConfig.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\config\RabbitMQConfig.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\config\SecurityConfig.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\controller\OrderController.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\controller\WebpayController.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\dto\OrderEventDTO.java
+C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\dto\OrderItemDTO.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\entity\Order.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\entity\OrderItem.java
 C:\Users\Bruno\OneDrive\Documentos\GitHub\pedidos360-backend\ms-pedidos360-orders\src\main\java\com\pedidos360\orders_service\messaging\EventEnvelope.java
