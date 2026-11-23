@@ -13,7 +13,11 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:4200", "http://localhost:3000") // Angular y React habilitados
+                        .allowedOrigins(
+                                "http://localhost:4200",
+                                "http://localhost:3000",
+                                "https://pedidos360-frontend-pearl.vercel.app"
+                        )
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")
                         .allowCredentials(true);
