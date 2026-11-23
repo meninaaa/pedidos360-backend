@@ -9,13 +9,13 @@ Este repositorio contiene el backend completo. El frontend (Angular 18 + MSAL) v
 | Servicio | Puerto | Responsabilidad |
 |---|---|---|
 | `ms-pedidos360-bff` | 8080 | Entrada HTTP para el cliente, propaga el JWT entrante y reenvía hacia los microservicios internos vía `RestTemplate`. |
-| `ms-pedidos360-orders` | 8081 | CRUD de pedidos, máquina de estados, coordinación de descuento de stock contra `catalog`, integración de pagos con Transbank Webpay Plus, productor de eventos Kafka y comandos RabbitMQ. |
+| `ms-pedidos360-orders` | 8081 | CRUD de pedidos, máquina de estados, coordinación de descuento de stock contra `catalog`, integración de pagos con Transbank Webpay Plus, productor de eventos Kafka (`OrderEventDTO`) y comandos RabbitMQ. |
 | `ms-pedidos360-catalog` | 8082 | CRUD de productos, control de stock, expone el endpoint interno de descuento usado por `orders`. |
 | `ms-pedidos360-notify` | 8083 | Consumidor de RabbitMQ para el envío de notificaciones (sin base de datos propia). |
-| `ms-pedidos360-audit` | 8084 | Consume eventos JSON de Kafka, valida su estructura y los persiste como registro inmutable de auditoría en `audit_logs`. |
-| `ms-pedidos360-report` | 8085 | Consume eventos de Kafka, los persiste en `report_logs` y calcula KPIs (ventas, pedidos activos, lead time) a partir del histórico. |
+| `ms-pedidos360-audit` | 8084 | Consume eventos `OrderEventDTO` desde Kafka, valida su estructura y los persiste como registro inmutable de auditoría en `audit_logs`. |
+| `ms-pedidos360-report` | 8085 | Consume eventos `OrderEventDTO` de Kafka, los persiste en `report_logs` y calcula KPIs (ventas, pedidos activos, lead time y top productos) a partir del histórico. |
 | `ms-pedidos360-rabbit_admin` | 8086 | **Microservicio administrador de RabbitMQ.** API REST para crear colas, exchanges y bindings y eliminar colas y exchanges del clúster, con validación de entrada. Acceso restringido al rol `Admin`. |
-| `ms-pedidos360-kafka_admin` | 8087 | **Microservicio administrador de Kafka.** API REST sobre `AdminClient` para listar, crear, modificar y eliminar tópicos y consultar consumer groups y lag del clúster. |
+| `ms-pedidos360-kafka_admin` | 8087 | **Microservicio administrador de Kafka.** API REST sobre `AdminClient` para listar, crear, modificar y eliminar tópicos y consultar consumer groups y lag del clúster. Acceso restringido al rol `Admin`. |
 | Oracle XE | 1521 (1522 en el host) | Base de datos, una instancia por servicio que la requiere (aislamiento de dominio). |
 | Kafka + Zookeeper (3x3) | 9092, 9093, 9094 / 29092–29094 interno | Event streaming de eventos de negocio desplegado como clúster de 3 brokers y 3 zookeepers (`kafka-ui` en puerto 8090). |
 | RabbitMQ (`rabbit1`, `rabbit2`) | 5672 y 5673 (AMQP) / 15672 y 15673 (consola) | Mensajería de comandos de trabajo, desplegada como clúster de dos nodos. |
@@ -33,7 +33,8 @@ graph LR
     BFF --> AUD["ms-pedidos360-audit :8084"]
     BFF --> REP["ms-pedidos360-report :8085"]
     BFF -->|solo Admin| ADM["ms-pedidos360-rabbit_admin :8086"]
-    KADM["ms-pedidos360-kafka_admin :8087"] -->|administra tópicos y grupos| KAFKA[("Clúster Kafka<br/>3 ZK + 3 Brokers")]
+    BFF -->|solo Admin| KADM["ms-pedidos360-kafka_admin :8087"]
+    KADM -->|administra tópicos y grupos| KAFKA[("Clúster Kafka<br/>3 ZK + 3 Brokers")]
     ORD -->|PUT reduce-stock| CAT
     ORD -->|orders.events + audit.timeline| KAFKA
     KAFKA --> AUD
@@ -65,14 +66,14 @@ sequenceDiagram
     participant TBK as Transbank
 
     Cliente->>FE: Crear pedido
-    FE->>BFF: POST /api/orders (JWT)
+    FE->>BFF: POST /api/bff/orders (JWT)
     BFF->>ORD: POST /api/orders (JWT)
     ORD->>ORD: createOrder() -> estado CREADO
-    ORD->>K: publicarEventoKafka() -> orders.events + audit.timeline
+    ORD->>K: publicarEventoKafka() -> OrderEventDTO a orders.events + audit.timeline
     ORD-->>FE: 201 Created
 
     Cliente->>FE: Pagar
-    FE->>BFF: POST /api/payments/create (JWT)
+    FE->>BFF: POST /api/bff/payments/create (JWT)
     BFF->>ORD: POST /api/payments/create (JWT)
     ORD->>TBK: POST /transactions
     TBK-->>ORD: url + token_ws
@@ -86,7 +87,7 @@ sequenceDiagram
     TBK-->>ORD: status AUTHORIZED
     ORD->>ORD: updateOrderStatus(ACEPTADO)
     ORD->>CAT: PUT reduce-stock
-    ORD->>K: publicarEventoKafka()
+    ORD->>K: publicarEventoKafka() -> OrderEventDTO
     ORD-->>Cliente: Redirect /payment-result
 ```
 
@@ -95,8 +96,8 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph Kafka["Kafka (clúster 3x3)"]
-        T1["orders.events"] --> REP["ms-report (report-group)"]
-        T2["audit.timeline"] --> AUD["ms-audit (audit-group)"]
+        T1["orders.events<br/>(3 part. / RF 3)"] --> REP["ms-report (report-group)"]
+        T2["audit.timeline<br/>(3 part. / RF 3)"] --> AUD["ms-audit (audit-group)"]
         REP -.3 reintentos.-> DLT1["orders.events.DLT"]
         AUD -.3 reintentos.-> DLT2["audit.timeline.DLT"]
         KADM["ms-kafka_admin :8087"] -.administra.-> T1
@@ -127,11 +128,11 @@ graph TB
 1. El cliente llama a `ms-pedidos360-bff` con un token JWT emitido por Azure AD.
 2. El BFF reenvía la petición hacia `ms-pedidos360-orders`, propagando el header `Authorization`.
 3. `OrderController.crearPedido(...)` recibe el request y delega en `OrderService.createOrder(...)`.
-4. `createOrder(...)` persiste el pedido en estado `CREADO`, publica el evento correspondiente y encola una notificación.
+4. `createOrder(...)` persiste el pedido en estado `CREADO`, publica el evento tipado correspondiente y encola una notificación.
 5. Al cambiar de estado vía `PUT /{id}/status`, `OrderController.cambiarEstado(...)` valida la transición (no se puede `DESPACHADO` sin pasar antes por `ACEPTADO`/`EN_PREPARACION`) y delega en `OrderService.updateOrderStatus(...)`.
 6. Si el nuevo estado es `ACEPTADO`, `coordinarDescuentoStock(...)` llama de forma síncrona a `ms-pedidos360-catalog` (`PUT /api/catalog/products/{id}/reduce-stock`), propagando el JWT original extraído del `HttpServletRequest`.
-7. Cada cambio de estado dispara `publicarEventoKafka(...)`, que publica el pedido serializado en **dos** tópicos: `orders.events` y `audit.timeline`.
-8. `ms-pedidos360-report` consume `orders.events` y `ms-pedidos360-audit` consume `audit.timeline`, cada uno con su propio `group-id` (`report-group`, `audit-group`). Ambos reintentan 3 veces ante un fallo y, si persiste, el mensaje pasa al tópico `.DLT` correspondiente.
+7. Cada cambio de estado dispara `publicarEventoKafka(...)`, que construye un `OrderEventDTO` (incluyendo los ítems `OrderItemDTO`) y lo envía a dos tópicos: `orders.events` y `audit.timeline`.
+8. `ReportEventListener` (`ms-pedidos360-report`) consume `orders.events` y `AuditEventListener` (`ms-pedidos360-audit`) consume `audit.timeline`, cada uno con su propio `group-id` (`report-group`, `audit-group`). Ambos reintentan con backoff acotado ante un fallo y, si persiste, el mensaje pasa al tópico `.DLT` correspondiente.
 
 Las transiciones de estado válidas son: `CREADO → ACEPTADO → EN_PREPARACION → DESPACHADO → ENTREGADO / CANCELADO`.
 
@@ -141,7 +142,7 @@ Kafka se usa para publicar hechos de negocio ya ocurridos (un pedido fue creado,
 
 ### Clúster 3x3
 
-Definido en `infra/kafka/compose.yml` sobre la red compartida `pedidos360-net`:
+Desplegado como un clúster de 3 nodos Zookeeper y 3 brokers Kafka, con contenedor de inicialización (`kafka-init`) y consola `kafka-ui`:
 
 | Componente | Contenedores | Puertos Host |
 |---|---|---|
@@ -151,31 +152,38 @@ Definido en `infra/kafka/compose.yml` sobre la red compartida `pedidos360-net`:
 
 ### Tópicos
 
-| Tópico | Productor | Consumidor | Uso |
-|---|---|---|---|
-| `orders.events` | `ms-pedidos360-orders` | `ms-pedidos360-report` (`report-group`) | Fuente para el cálculo de KPIs: ventas totales, pedidos activos, lead time promedio. |
-| `audit.timeline` | `ms-pedidos360-orders` | `ms-pedidos360-audit` (`audit-group`) | Timeline inmutable de trazabilidad de pedidos. |
-| `audit.timeline.DLT` / `orders.events.DLT` | Spring Kafka (`@RetryableTopic`) | `@DltHandler` | Aislamiento de mensajes con JSON inválido o errores tras 3 reintentos. |
+Los tópicos principales se declaran explícitamente con 3 particiones, factor de replicación 3 y política de retención (`retention.ms`) mediante `KafkaTopicConfig` y el contenedor `kafka-init`:
+
+| Tópico | Particiones / Réplicas | Productor | Consumidor | Uso |
+|---|---|---|---|---|
+| `orders.events` | 3 / RF 3 | `ms-pedidos360-orders` | `ms-pedidos360-report` (`report-group`) | Fuente para el cálculo de KPIs: ventas totales, pedidos activos, lead time promedio y top productos. |
+| `audit.timeline` | 3 / RF 3 | `ms-pedidos360-orders` | `ms-pedidos360-audit` (`audit-group`) | Timeline inmutable de trazabilidad de pedidos. |
+| `audit.timeline.DLT` / `orders.events.DLT` | 1 / RF 3 | Spring Kafka (`@RetryableTopic`) | `@DltHandler` | Aislamiento de mensajes con payload inválido o errores tras los reintentos configurados. |
 
 ### Publicación
 
-El método `publicarEventoKafka(Order order)` en `OrderService.java` serializa el pedido completo con `ObjectMapper` y lo envía a ambos tópicos usando el ID del pedido como key:
+El método `publicarEventoKafka(Order order)` en `OrderService.java` mapea la orden y sus ítems al contrato tipado `OrderEventDTO` (`OrderItemDTO`) y lo envía vía `KafkaTemplate<String, OrderEventDTO>` usando el ID del pedido como key:
 
 ```java
-kafkaTemplate.send("orders.events", String.valueOf(order.getId()), eventPayload);
-kafkaTemplate.send("audit.timeline", String.valueOf(order.getId()), eventPayload);
+kafkaTemplate.send("orders.events", String.valueOf(order.getId()), eventDto);
+kafkaTemplate.send("audit.timeline", String.valueOf(order.getId()), eventDto);
 ```
 
 Se invoca desde `createOrder(...)` (al crear un pedido) y desde `updateOrderStatus(...)` (en cada transición de estado).
 
-### Consumo
+### Consumo y separación de responsabilidades
 
-- **`ms-pedidos360-audit`** — `AuditConsumerService.consumeEvent(...)` escucha `audit.timeline` con `group-id: audit-group`. Valida con `ObjectMapper` que el payload sea un objeto JSON válido, extrae `eventType` y `actor` (o `SYSTEM` por defecto), recorta el string a 3.900 caracteres por el límite de la columna en Oracle y lo persiste vía `AuditLogRepository`. Usa `@RetryableTopic` con 3 intentos y sufijo `.DLT` (`@DltHandler`) para los mensajes malformados o que fallan al guardarse.
-- **`ms-pedidos360-report`** — `ReportMetricsService.consumeOrderEvent(...)` escucha `orders.events` con `group-id: report-group` (también con `@RetryableTopic`, 3 intentos y `.DLT`). Persiste cada evento como `OrderEventLog` en `report_logs` y actualiza en memoria los contadores agregados mediante `aplicarEvento(...)`:
-  - `CREADO` → incrementa `pedidosActivos`.
-  - `ENTREGADO` → decrementa `pedidosActivos`, suma a `ventasTotales` y calcula el lead time (`Duration` entre el timestamp de creación y el de entrega).
-  - `CANCELADO` → decrementa `pedidosActivos`.
-  - Al arrancar, `@PostConstruct reconstruirEstadoDesdeBaseDeDatos()` relee todo `report_logs` y reproduce los eventos en orden, para que las métricas sobrevivan un reinicio del contenedor.
+Los listeners de infraestructura están desacoplados de los servicios de dominio:
+
+**`ms-pedidos360-audit`** — `AuditEventListener` recibe el `OrderEventDTO` desde `audit.timeline` (`group-id: audit-group`) con `@RetryableTopic` y `@DltHandler`, delegando el procesamiento en `AuditConsumerService`. Valida la integridad del evento, extrae `eventType` y `actor` (o `SYSTEM` por defecto), recorta el JSON a 3.900 caracteres por el límite de la columna en Oracle y lo persiste vía `AuditLogRepository`.
+
+**`ms-pedidos360-report`** — `ReportEventListener` recibe el `OrderEventDTO` desde `orders.events` (`group-id: report-group`) con `@RetryableTopic` y `@DltHandler`, delegando en `ReportMetricsService`. Persiste cada evento como `OrderEventLog` en `report_logs` y actualiza en memoria los contadores agregados mediante `aplicarEvento(...)`:
+
+- `CREADO` → incrementa `pedidosActivos`.
+- `ENTREGADO` → decrementa `pedidosActivos`, suma a `ventasTotales`, calcula el lead time (`Duration` entre creación y entrega) y acumula unidades vendidas por producto (top-productos).
+- `CANCELADO` → decrementa `pedidosActivos`.
+
+Al arrancar, `@PostConstruct reconstruirEstadoDesdeBaseDeDatos()` relee `report_logs` y reproduce los eventos en orden para reconstruir KPIs y ranking de productos tras un reinicio.
 
 ### Configuración
 
@@ -185,21 +193,22 @@ spring:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka-1:29092,kafka-2:29093,kafka-3:29094}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
     consumer:
       group-id: report-group   # o audit-group, según el servicio
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-```
-
-```bash
-docker compose -f infra/kafka/compose.yml up -d
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: com.pedidos360.<servicio>.dto.OrderEventDTO
+        spring.json.use.type.headers: false
 ```
 
 ## Microservicio administrador de Kafka (`ms-pedidos360-kafka_admin`)
 
-Servicio independiente (puerto **8087**) que administra tópicos y consumer groups del clúster Kafka usando `AdminClient` de Apache Kafka. Todas sus rutas requieren un token JWT válido de Azure AD.
+Servicio independiente (puerto **8087**) que administra tópicos y consumer groups del clúster Kafka usando `AdminClient` de Apache Kafka. Todas sus rutas requieren un token JWT válido de Azure AD con rol `Admin` / `Administrador` (`@PreAuthorize("hasAnyRole('Admin', 'Administrador')")`).
 
 ### Operaciones expuestas (`/api/kafka-admin`)
 
@@ -311,15 +320,7 @@ La API REST del administrador cuelga de la ruta base `/api/admin` (la misma que 
 | Eliminar un exchange | `DELETE` | Admin |
 | Crear un binding (exchange, cola y routing key) | `POST` | Admin |
 
-Las solicitudes sin token válido o sin rol `Admin` son rechazadas, y los cambios aplicados son visibles de inmediato en el Management UI del clúster.
-
-### Organización del código
-
-El código vive en el paquete `com.pedidos360.rabbit_admin`. El controller REST recibe y valida la entrada, y la lógica de administración está en `RabbitAdminService`, que declara y elimina los recursos en el broker.
-
 ### Métricas de monitoreo (Management UI)
-
-Para operar el clúster se observan cuatro métricas en el Management UI:
 
 | Métrica | Dónde verla | Por qué importa |
 |---|---|---|
@@ -335,37 +336,38 @@ Para operar el clúster se observan cuatro métricas en el Management UI:
 | Endpoint | Método | Autenticación | Descripción |
 |---|---|---|---|
 | `/api/payments/create` | `POST` | JWT (usuario autenticado) | Inicia la transacción contra Transbank y devuelve `url` + `token_ws`. |
-| `/api/payments/commit` | `POST` | **Pública, sin JWT** | Recibida directamente desde el navegador tras el formulario de retorno de Transbank; confirma la transacción y, si fue `AUTHORIZED`, invoca `OrderService.updateOrderStatus(orderId, ACEPTADO)`. |
+| `/api/payments/commit` | `GET` / `POST` | **Pública, sin JWT** | Recibida desde el retorno de Transbank; confirma la transacción y, si fue `AUTHORIZED`, invoca `OrderService.updateOrderStatus(orderId, ACEPTADO)`. |
 
-`/payments/commit` debe quedar exenta de autenticación en la configuración de seguridad y, si el backend corre detrás de AWS API Gateway, también debe existir como ruta específica sin JWT Authorizer — el POST de retorno de Transbank nunca lleva un header `Authorization`.
-
-## API expuesta por el BFF
+## API expuesta por el BFF (`/api/bff`)
 
 | Método | Ruta | Rol requerido | Descripción |
 |---|---|---|---|
-| `GET` | `/api/orders` | Admin | Listado global de pedidos. |
-| `GET` | `/api/orders/pending` | Admin, Operador | Pedidos en curso y pendientes (sin estado final). |
-| `GET` | `/api/orders/customer?email=` | Admin, Operador, Cliente | Pedidos del usuario autenticado. |
-| `POST` | `/api/orders` | Admin, Operador, Cliente | Crear un pedido. |
-| `PUT` | `/api/orders/{id}/status` | Admin, Operador | Cambiar el estado de un pedido. |
-| `GET` | `/api/audit` | Admin, Operador | Timeline de auditoría (solo lectura). |
-| `GET` | `/api/reports/summary` | Admin | KPIs agregados en vivo. |
-| `GET` | `/api/reports/ventas-por-hora` | Admin | Serie de ventas agregadas por hora. |
-| `GET` | `/api/reports/lead-time-trend` | Admin | Lead time por pedido entregado. |
-| `POST` | `/api/payments/create` | Usuario autenticado | Inicia un pago Webpay. |
-| `POST` | `/api/payments/commit` | Pública | Confirmación de pago (llamada por Transbank). |
+| `GET` | `/api/bff/orders` | Admin, Operador, Cliente | Resuelve automáticamente el listado según rol (`/orders`, `/orders/pending` o `/orders/me`). |
+| `GET` | `/api/bff/orders/pending` | Admin, Operador | Pedidos en curso y pendientes (sin estado final). |
+| `GET` | `/api/bff/orders/me` | Cliente | Pedidos filtrados del usuario autenticado. |
+| `GET` | `/api/bff/orders/customer?email=` | Admin, Operador, Cliente | Pedidos filtrados por correo de cliente. |
+| `POST` | `/api/bff/orders` | Admin, Operador, Cliente | Crear un pedido. |
+| `PUT` | `/api/bff/orders/{id}/status` | Admin, Operador | Cambiar el estado de un pedido. |
+| `GET` | `/api/bff/audit` | Admin | Timeline de auditoría (solo lectura). |
+| `GET` | `/api/bff/reports/summary` | Admin | KPIs agregados en vivo. |
+| `GET` | `/api/bff/reports/ventas-por-hora` | Admin | Serie de ventas agregadas por hora. |
+| `GET` | `/api/bff/reports/lead-time-trend` | Admin | Lead time por pedido entregado. |
+| `GET` | `/api/bff/reports/top-productos` | Admin | Ranking de productos más vendidos desde `OrderItemDTO`. |
+| `*` | `/api/bff/kafka-admin/**` | Admin | Proxy hacia `ms-pedidos360-kafka_admin` para gestión de tópicos y grupos Kafka. |
 | `*` | `/api/admin/**` | Admin | Administración de colas, exchanges y bindings de RabbitMQ (ver sección del administrador). |
+| `POST` | `/api/bff/payments/create` | Usuario autenticado | Inicia un pago Webpay. |
+| `GET` | `/api/bff/payments/commit` | Pública | Confirmación de pago y redirección al frontend. |
 
 ## Seguridad
 
-1. El frontend se autentica contra Azure AD vía MSAL y adjunta el JWT como `Authorization: Bearer <token>`.
-2. En despliegue cloud, AWS API Gateway (HTTP API) valida `issuer` y `audience` con un JWT Authorizer antes de enrutar, incluida la ruta `/api/admin/*`.
-3. Cada microservicio vuelve a validar el token de forma independiente (`spring.security.oauth2.resourceserver.jwt.issuer-uri`), y aplica autorización por rol con `@PreAuthorize("hasAnyRole(...)")`. La administración de RabbitMQ queda limitada a `Admin`.
-4. El claim `roles` del JWT se mapea a authorities con prefijo `ROLE_`. Los roles usados en todo el sistema son, en español: `Admin`, `Operador`, `Cliente`.
+- El frontend se autentica contra Azure AD vía MSAL y adjunta el JWT como `Authorization: Bearer <token>`.
+- En despliegue cloud, AWS API Gateway (HTTP API) valida `issuer` y `audience` con un JWT Authorizer antes de enrutar, incluidas las rutas `/api/admin/*` y `/api/bff/kafka-admin/*`.
+- Cada microservicio valida el token de forma independiente (`spring.security.oauth2.resourceserver.jwt.issuer-uri`) y aplica autorización por rol con `@PreAuthorize("hasAnyRole(...)")` y reglas en `SecurityConfig`. La administración de RabbitMQ y Kafka queda limitada a `Admin` / `Administrador`.
+- El claim `roles` del JWT se mapea a authorities con prefijo `ROLE_`. Los roles usados en todo el sistema son: `Admin` / `Administrador`, `Operador` / `Operador de Logística`, `Cliente`.
 
 ## Pruebas
 
-Las pruebas mínimas obligatorias de la pauta (sección 7 de la guía de la EP2) están cubiertas con pruebas automatizadas en JUnit 5 + Mockito + Spring Security Test, a excepción de dos que dependen de infraestructura en ejecución y se verifican manualmente (ver más abajo).
+Las pruebas obligatorias de la pauta (RabbitMQ, seguridad, reglas de negocio y Apache Kafka) están automatizadas con JUnit 5 + Mockito + Spring Security Test.
 
 ### Cobertura de la pauta
 
@@ -380,16 +382,25 @@ Las pruebas mínimas obligatorias de la pauta (sección 7 de la guía de la EP2)
 | 08 | Publicación y consumo normal (las tres colas) | El mensaje es consumido y confirmado con ACK. | `notify` | `NotifyResilienceTest#cuandoConsumoEmailExitoso_entoncesConfirmaConAck`, `...KitchenExitoso...`, `...InvoiceExitoso...` |
 | 09 | Mensaje con error no recuperable (las tres colas) | NACK sin requeue; el mensaje llega a la DLQ. | `notify` | `NotifyResilienceTest#cuandoErrorProcesamientoEmail_entoncesEnviaNackSinRequeueADlq`, `...Kitchen...`, `...Invoice...` |
 | 10 | Error recuperable | Reintentos acotados y, si persiste, el mensaje termina en la DLQ. | `notify` | Suite completa `NotifyResilienceTest` |
-| 11 | Administrador: crear recurso válido | El recurso se declara correctamente en el broker. | `rabbit_admin` | `RabbitAdminTest#cuandoCrearColaValida_entoncesCreaRecursoExitosamente` |
-| 12 | Administrador: eliminar recurso | El recurso se elimina con éxito. | `rabbit_admin` | `RabbitAdminTest#cuandoEliminarColaExistente_entoncesBorraRecurso` |
-| 13 | Administrador: nombre vacío o configuración inválida | Se rechaza con HTTP 400 y no se crea nada. | `rabbit_admin` | `RabbitAdminTest#cuandoNombreColaVacio_entoncesLanzaExcepcionBadRequest` |
+| 11 | Administrador RabbitMQ: crear recurso válido | El recurso se declara correctamente en el broker. | `rabbit_admin` | `RabbitAdminTest#cuandoCrearColaValida_entoncesCreaRecursoExitosamente` |
+| 12 | Administrador RabbitMQ: eliminar recurso | El recurso se elimina con éxito. | `rabbit_admin` | `RabbitAdminTest#cuandoEliminarColaExistente_entoncesBorraRecurso` |
+| 13 | Administrador RabbitMQ: nombre vacío o configuración inválida | Se rechaza con HTTP 400 y no se crea nada. | `rabbit_admin` | `RabbitAdminTest#cuandoNombreColaVacio_entoncesLanzaExcepcionBadRequest` |
+| 14 | Kafka Productor: emisión en creación de pedido | Publica `OrderEventDTO` en `orders.events` y `audit.timeline`. | `orders` | `OrderKafkaProducerTest#cuandoCrearPedido_entoncesPublicaDtoEnAmbosTopicosKafka` |
+| 15 | Kafka Productor: emisión en actualización de estado | Emite evento actualizado hacia Kafka al cambiar el estado del pedido. | `orders` | `OrderKafkaProducerTest#cuandoActualizarEstadoAEntregado_entoncesEmiteEventoConNuevoEstado` |
+| 16 | Kafka Consumidor Auditoría: persistencia válida | Consume desde `audit.timeline` y guarda registro inmutable en Oracle. | `audit` | `AuditEventListenerTest#cuandoEventoAuditoriaValido_entoncesPersisteEnBaseDeDatos` |
+| 17 | Kafka Consumidor Auditoría: payload inválido a DLT | Rechaza mensaje corrupto para activar reintentos y enrutamiento a DLT. | `audit` | `AuditEventListenerTest#cuandoEventoAuditoriaInvalido_entoncesLanzaExcepcionParaReintentoYDlt` |
+| 18 | Kafka Consumidor Reportería: KPIs y Top Productos | Calcula ventas, pedidos activos, lead time y top productos en tiempo real. | `report` | `ReportEventListenerTest#cuandoFlujoPedidoCompletado_entoncesActualizaMetricasYTopProductos` |
+| 19 | Kafka Consumidor Reportería: payload inválido a DLT | Rechaza mensaje inválido para activar reintentos y enrutamiento a DLT. | `report` | `ReportEventListenerTest#cuandoEventoReporteInvalido_entoncesLanzaExcepcionParaReintentoYDlt` |
+| 20 | Kafka Admin: solicitud sin token | Retorna HTTP 401 Unauthorized. | `kafka_admin` | `KafkaAdminSecurityTest#cuandoSinToken_entoncesRetornaUnauthorized` |
+| 21 | Kafka Admin: solicitud con rol Cliente | Retorna HTTP 403 Forbidden. | `kafka_admin` | `KafkaAdminSecurityTest#cuandoRolCliente_entoncesRetornaForbidden` |
+| 22 | Kafka Admin: solicitud con rol Admin | Retorna HTTP 200 OK y permite gestionar tópicos. | `kafka_admin` | `KafkaAdminSecurityTest#cuandoRolAdmin_entoncesPermiteListarTopicos` |
 
 ### Pruebas verificadas manualmente
 
 | # | Prueba | Cómo verificarla |
 |---|---|---|
-| 07 | Estado del clúster | `rabbitmqctl cluster_status` o Management UI (puerto 15672): los dos nodos en ejecución. |
-| 14 | Política de retención | Superar el límite o la expiración definidos y comprobar que los mensajes se descartan o pasan a la DLQ. |
+| 07 | Estado de los clústeres | `rabbitmqctl cluster_status` / Management UI (15672) y Kafka-UI (8090): 3 brokers online con 0 particiones sub-replicadas. |
+| 14b | Política de retención y particionado | Verificar 3 particiones, factor de replicación 3 y `retention.ms` en Kafka-UI (`http://localhost:8090`). |
 
 ### Ejecución
 
@@ -402,12 +413,12 @@ Desde la raíz de cada módulo:
 o una prueba puntual:
 
 ```bash
-./mvnw test -Dtest="SecurityTest#cuandoSinToken_entoncesRechazado"
+./mvnw test -Dtest="OrderKafkaProducerTest"
 ```
 
 ### Integración continua
 
-El workflow de GitHub Actions `Pedidos360 - Pruebas solicitadas en la pauta` (`.github/workflows`) ejecuta cada prueba de la tabla anterior como un job independiente de la matriz, de modo que cada fila de la pauta queda como un check separado con su resultado esperado registrado en el resumen de la ejecución. Se dispara en cada `push` y `pull_request` hacia `main`, `master` y `develop`, y manualmente con `workflow_dispatch`. Si una prueba falla, se suben los reportes de Surefire como artefacto.
+El workflow de GitHub Actions `Pedidos360 - Pruebas solicitadas en la pauta` (`.github/workflows/ci.yml`) ejecuta las pruebas automatizadas de la tabla anterior como jobs independientes de la matriz, dejando cada fila de la pauta como un check separado con su resultado esperado registrado en el resumen de la ejecución. Se dispara en cada `push` y `pull_request` hacia `main`, `master` y `develop`, y manualmente con `workflow_dispatch`. Si una prueba falla, se suben los reportes de Surefire como artefacto.
 
 ## Requisitos
 
@@ -435,26 +446,25 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: [https://login.microsoftonline.com/](https://login.microsoftonline.com/)<TENANT_ID>/v2.0
+          issuer-uri: https://login.microsoftonline.com/<TENANT_ID>/v2.0
           audiences: <API_CLIENT_ID>
 ```
 
 ## Ejecución con Docker Compose
 
 ```bash
-git clone [https://github.com/meninaaa/pedidos360-backend.git](https://github.com/meninaaa/pedidos360-backend.git)
-cd pedidos360-backend
+git clone https://github.com/meninaaa/pedidos360-backend.git
+cd pedidos360-backend/infra/apps
 
-# 1. Levantar el clúster Kafka 3x3 y Kafka-UI
-docker compose -f infra/kafka/compose.yml up -d
-
-# 2. Construir y levantar los microservicios, Oracle XE y RabbitMQ
-docker compose -f infra/apps/compose.yml up -d --build
+# Construir y levantar la infraestructura completa
+# (Oracle XE, RabbitMQ x2, Kafka 3x3, Kafka-UI y los 8 microservicios)
+docker compose up -d --build
 ```
 
 Swagger de cada servicio disponible en `http://localhost:<puerto>/swagger-ui.html`.
 
 URLs útiles:
+
 - BFF: `http://localhost:8080`
 - Administrador de RabbitMQ: `http://localhost:8086`
 - Administrador de Kafka: `http://localhost:8087/swagger-ui.html`
@@ -466,8 +476,8 @@ URLs útiles:
 
 - **EC2** (recomendado `t3.medium` o superior, con **Elastic IP** asociada para evitar que la integración del API Gateway se rompa en cada reinicio) corriendo el stack completo, incluidos los clústeres Kafka y RabbitMQ, vía Docker Compose.
 - **AWS API Gateway (HTTP API)** con:
-  - Ruta proxy `ANY /{proxy+}` hacia la EC2, protegida por un **JWT Authorizer** (`issuer` y `audience` de Azure AD). Esto incluye las rutas `/api/admin/*` y `/api/kafka-admin/*`.
-  - Ruta específica `POST /api/bff/payments/commit`, **sin Authorizer**, para el retorno de Transbank.
+  - Ruta proxy `ANY /{proxy+}` hacia la EC2, protegida por un **JWT Authorizer** (`issuer` y `audience` de Azure AD). Esto incluye `/api/admin/*` y `/api/bff/kafka-admin/*`.
+  - Rutas específicas `GET /api/bff/payments/commit` y `POST /api/payments/commit`, **sin Authorizer**, para el retorno de Transbank.
   - **CORS** configurado nativamente en la API (no como ruta `OPTIONS` manual), ya que el preflight del navegador nunca lleva JWT y el Authorizer lo rechazaría.
 
 ## Estructura del repositorio
@@ -475,10 +485,11 @@ URLs útiles:
 ```
 .
 ├── .github/
-│   └── workflows/            # pruebas de la pauta (matriz)
+│   └── workflows/
+│       └── ci.yml            # pruebas de la pauta (matriz)
 ├── infra/
 │   ├── apps/
-│   │   └── compose.yml
+│   │   └── compose.yml       # stack completo unificado
 │   ├── kafka/
 │   │   └── compose.yml
 │   └── mq/
@@ -495,4 +506,4 @@ URLs útiles:
 ## Observaciones del estado actual
 
 - La identificación del "dueño" de un pedido para el endpoint `/orders/customer` se hace comparando el claim `name`/email del JWT contra el campo `customerId` (texto libre), no contra un `userId` estable de Azure AD. Es suficiente para el alcance del caso, pero no es robusto ante usuarios con el mismo nombre.
-- Las pruebas 07 (estado del clúster) y 14 (política de retención) no están automatizadas porque dependen de infraestructura en ejecución; se verifican manualmente en el Management UI y en Kafka-UI.
+- Las pruebas 07 (estado de los clústeres) y 14b (política de retención y particionado) no están automatizadas porque dependen de infraestructura en ejecución; se verifican manualmente en el Management UI y en Kafka-UI.
