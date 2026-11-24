@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class OrderService {
@@ -130,33 +131,37 @@ public class OrderService {
         }
     }
 
-    private void publicarEventoKafka(Order order) {
+    private OrderEventDTO construirEventoKafka(Order order) {
+        OrderEventDTO event = new OrderEventDTO();
+        event.setId(order.getId());
+        event.setCustomerId(order.getCustomerId());
+        event.setStatus(order.getStatus().name());
+        event.setTotal(order.getTotal());
+        event.setEventType("ORDER_EVENT");
+        event.setActor("SYSTEM");
+        event.setCreatedAt(order.getCreatedAt());
+        event.setEventTimestamp(LocalDateTime.now());
+
+        List<OrderItemDTO> itemDTOs = new ArrayList<>();
+        if (order.getItems() != null && !order.getItems().isEmpty()) {
+            order.getItems().forEach(item ->
+                itemDTOs.add(new OrderItemDTO(
+                    item.getProductId(),
+                    null,
+                    item.getQuantity(),
+                    null
+                ))
+            );
+        } else if (order.getProductId() != null) {
+            itemDTOs.add(new OrderItemDTO(order.getProductId(), null, 1, order.getTotal()));
+        }
+        event.setItems(itemDTOs);
+        return event;
+    }
+
+    public void publicarEventoKafka(Order order) {
         try {
-            OrderEventDTO event = new OrderEventDTO();
-            event.setId(order.getId());
-            event.setCustomerId(order.getCustomerId());
-            event.setStatus(order.getStatus().name());
-            event.setTotal(order.getTotal());
-            event.setEventType("ORDER_EVENT");
-            event.setActor("SYSTEM");
-            event.setCreatedAt(order.getCreatedAt());
-            event.setEventTimestamp(LocalDateTime.now());
-
-            List<OrderItemDTO> itemDTOs = new ArrayList<>();
-            if (order.getItems() != null && !order.getItems().isEmpty()) {
-                order.getItems().forEach(item ->
-                    itemDTOs.add(new OrderItemDTO(
-                        item.getProductId(),
-                        null,
-                        item.getQuantity(),
-                        null
-                    ))
-                );
-            } else if (order.getProductId() != null) {
-                itemDTOs.add(new OrderItemDTO(order.getProductId(), null, 1, order.getTotal()));
-            }
-            event.setItems(itemDTOs);
-
+            OrderEventDTO event = construirEventoKafka(order);
             String key = String.valueOf(order.getId());
             kafkaTemplate.send("orders.events", key, event);
             kafkaTemplate.send("audit.timeline", key, event);
@@ -164,6 +169,13 @@ public class OrderService {
         } catch (Exception e) {
             System.err.println("[ERROR] Error al publicar evento Kafka: " + e.getMessage());
         }
+    }
+
+    public void publicarEventoKafkaSincrono(Order order) throws Exception {
+        OrderEventDTO event = construirEventoKafka(order);
+        String key = String.valueOf(order.getId());
+        kafkaTemplate.send("orders.events", key, event).get(5, TimeUnit.SECONDS);
+        kafkaTemplate.send("audit.timeline", key, event).get(5, TimeUnit.SECONDS);
     }
 
     private void enviarNotificacionRabbitMQ(Long orderId, String mensaje) {
