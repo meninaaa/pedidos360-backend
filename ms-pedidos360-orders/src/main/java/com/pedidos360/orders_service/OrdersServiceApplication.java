@@ -104,18 +104,24 @@ public class OrdersServiceApplication {
         publicarConReintento(orderService, order);
     }
 
+    private boolean kafkaDisponible = true;
+
     private void publicarConReintento(OrderService orderService, Order order) {
-        for (int intento = 1; intento <= 8; intento++) {
+        if (!kafkaDisponible) {
+            return;
+        }
+        for (int intento = 1; intento <= 6; intento++) {
             try {
                 orderService.publicarEventoKafkaSincrono(order);
                 return;
             } catch (Exception e) {
-                if (intento == 8) {
-                    System.err.println("[ERROR] No se pudo emitir evento semilla para pedido " + order.getId() + ": " + e.getMessage());
+                if (intento == 6) {
+                    kafkaDisponible = false;
+                    System.err.println("[WARN] Kafka no disponible en este entorno, se omite la carga inicial en broker.");
                     return;
                 }
                 try {
-                    Thread.sleep(3000);
+                    Thread.sleep(2500);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     return;
